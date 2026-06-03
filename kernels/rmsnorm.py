@@ -23,14 +23,39 @@ def rmsnorm_native(
     return torch.nn.functional.rms_norm(x, (x.shape[-1],), weight, eps)
 
 
+def early_config_prune(configs, named_args, **kwargs):
+    N = named_args["N"]
+    # We must ensure BLOCK_SIZE is at least N, otherwise the thread block 
+    # will not cover the entire dimension of the row.
+    pruned = [c for c in configs if c.kwargs["BLOCK_SIZE"] >= N]
+    if not pruned:
+        # Fallback config when N is larger than our pre-defined block sizes
+        fallback_block_size = triton.next_power_of_2(N)
+        num_warps = 16 if fallback_block_size >= 4096 else 8
+        return [triton.Config({"BLOCK_SIZE": fallback_block_size}, num_warps=num_warps)]
+    return pruned
+
+
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SIZE": 256}, num_warps=4),
+        triton.Config({"BLOCK_SIZE": 512}, num_warps=4),
+        triton.Config({"BLOCK_SIZE": 1024}, num_warps=8),
+        triton.Config({"BLOCK_SIZE": 2048}, num_warps=8),
+        triton.Config({"BLOCK_SIZE": 4096}, num_warps=16),
+        triton.Config({"BLOCK_SIZE": 8192}, num_warps=16),
+    ],
+    key=["N"],
+    prune_configs_by={"early_config_prune": early_config_prune},
+)
 @triton.jit
 def rmsnorm_kernel(
-    X,  # input pointer
-    Weight,  # weight pointer
-    Output,  # output pointer
-    stride,  # row stride of X
-    N,  # number of columns
-    eps,  # epsilon
+    x_ptr,
+    weight_ptr,
+    out_ptr,
+    stride,
+    N,
+    eps,
     BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
@@ -41,13 +66,14 @@ def rmsnorm_kernel(
 
     mask = col_offsets < N
 
-    x = tl.load(X + offsets, mask=mask)
-    weight = tl.load(Weight + col_offsets, mask=mask)
+    x = tl.load(x_ptr + offsets, mask=mask)
+    weight = tl.load(weight_ptr + col_offsets, mask=mask)
 
+    # Compute RMS norm
     rms = tl.sqrt(tl.sum(x * x) / N + eps)
     output = x / rms * weight
 
-    tl.store(Output + offsets, output, mask=mask)
+    tl.store(out_ptr + offsets, output, mask=mask)
 
 
 def rmsnorm_triton(
@@ -57,9 +83,10 @@ def rmsnorm_triton(
     stride = x.stride()[0]
     output = torch.empty_like(x)
 
-    BLOCK_SIZE = triton.next_power_of_2(N)
-
+    # Grid runs over row dimension
     grid = (x.shape[0],)
-    rmsnorm_kernel[grid](x, weight, output, stride, N, eps, BLOCK_SIZE)
+    
+    # Launch kernel; BLOCK_SIZE is omitted as it will be selected by the autotuner
+    rmsnorm_kernel[grid](x, weight, output, stride, N, eps)
 
     return output
