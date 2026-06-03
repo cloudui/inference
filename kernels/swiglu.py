@@ -36,15 +36,42 @@ def swiglu_kernel(
     pid = tl.program_id(axis=0)
 
     block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
 
-    x = tl.load(x_ptr + offsets, mask=mask)
-    gate = tl.load(gate_ptr + offsets, mask=mask)
+    # Create block pointers for input/gate/output tensors
+    x_block_ptr = tl.make_block_ptr(
+        base=x_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(block_start,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
+    gate_block_ptr = tl.make_block_ptr(
+        base=gate_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(block_start,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
+
+    # Load using block pointer with boundary checking
+    x = tl.load(x_block_ptr, boundary_check=(0,))
+    gate = tl.load(gate_block_ptr, boundary_check=(0,))
 
     output = x * (gate * tl.sigmoid(gate.to(tl.float32)))
 
-    tl.store(out_ptr + offsets, output.to(tl.float16), mask=mask)
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(block_start,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
+
+    # Store using block pointer with boundary checking
+    tl.store(out_block_ptr, output.to(tl.float16), boundary_check=(0,))
 
 
 def swiglu_native(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:

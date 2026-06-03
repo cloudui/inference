@@ -60,20 +60,44 @@ def rmsnorm_kernel(
 ):
     pid = tl.program_id(axis=0)
 
-    block_start = pid * stride
-    col_offsets = tl.arange(0, BLOCK_SIZE)
-    offsets = block_start + col_offsets
+    # Create block pointers for 1D row slices
+    x_block_ptr = tl.make_block_ptr(
+        base=x_ptr + pid * stride,
+        shape=(N,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
+    weight_block_ptr = tl.make_block_ptr(
+        base=weight_ptr,
+        shape=(N,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
 
-    mask = col_offsets < N
-
-    x = tl.load(x_ptr + offsets, mask=mask)
-    weight = tl.load(weight_ptr + col_offsets, mask=mask)
+    # Load block pointer elements (with boundary checking to handle trailing elements safely)
+    x = tl.load(x_block_ptr, boundary_check=(0,))
+    weight = tl.load(weight_block_ptr, boundary_check=(0,))
 
     # Compute RMS norm
     rms = tl.sqrt(tl.sum(x * x) / N + eps)
     output = x / rms * weight
 
-    tl.store(out_ptr + offsets, output, mask=mask)
+    # Create block pointer for output
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr + pid * stride,
+        shape=(N,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(BLOCK_SIZE,),
+        order=(0,),
+    )
+
+    # Store computed values using block pointer
+    tl.store(out_block_ptr, output, boundary_check=(0,))
 
 
 def rmsnorm_triton(
