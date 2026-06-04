@@ -42,16 +42,18 @@ def fused_rmsnorm_swiglu_kernel(
     gate_ptr,
     weight_ptr,
     out_ptr,
-    stride,
+    stride_batch,
+    stride_row,
     N,
     eps,
     BLOCK_SIZE: tl.constexpr,
 ):
-    pid = tl.program_id(axis=0)
+    pid_batch = tl.program_id(axis=0)
+    pid_row = tl.program_id(axis=1)
 
     # Create block pointers for input rows, weight, and gate
     x_block_ptr = tl.make_block_ptr(
-        base=x_ptr + pid * stride,
+        base=x_ptr + pid_batch * stride_batch + pid_row * stride_row,
         shape=(N,),
         strides=(1,),
         offsets=(0,),
@@ -67,7 +69,7 @@ def fused_rmsnorm_swiglu_kernel(
         order=(0,),
     )
     gate_block_ptr = tl.make_block_ptr(
-        base=gate_ptr + pid * stride,
+        base=gate_ptr + pid_batch * stride_batch + pid_row * stride_row,
         shape=(N,),
         strides=(1,),
         offsets=(0,),
@@ -89,7 +91,7 @@ def fused_rmsnorm_swiglu_kernel(
 
     # Create block pointer for output
     out_block_ptr = tl.make_block_ptr(
-        base=out_ptr + pid * stride,
+        base=out_ptr + pid_batch * stride_batch + pid_row * stride_row,
         shape=(N,),
         strides=(1,),
         offsets=(0,),
@@ -101,19 +103,19 @@ def fused_rmsnorm_swiglu_kernel(
     tl.store(out_block_ptr, output.to(tl.float16), boundary_check=(0,))
 
 
-def fused_rmsnorm_swiglu_triton(
+def fused_rmsnorm_swiglu(
     x: torch.Tensor, gate: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
 ) -> torch.Tensor:
     N = x.shape[-1]
-    stride = x.stride()[0]
+    stride_batch, stride_row, _ = x.stride()
     output = torch.empty_like(x)
 
     # Grid runs over row dimension
-    grid = (x.shape[0],)
+    grid = (x.shape[0], x.shape[1])
     
     # Launch kernel; BLOCK_SIZE is selected by the autotuner
     fused_rmsnorm_swiglu_kernel[grid](
-        x, gate, weight, output, stride, N, eps
+        x, gate, weight, output, stride_batch, stride_row, N, eps
     )
 
     return output

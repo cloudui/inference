@@ -106,13 +106,13 @@ def rmsnorm(
     x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
 ) -> torch.Tensor:
     N = x.shape[-1]
-    stride = x.stride()[0]
+    stride_batch, stride_row, _ = x.stride()
     output = torch.empty_like(x)
 
     # Grid runs over row dimension
     grid = (x.shape[0], x.shape[1])
     
     # Launch kernel; BLOCK_SIZE is omitted as it will be selected by the autotuner
-    rmsnorm_kernel[grid](x, weight, output, stride, N, eps)
+    rmsnorm_kernel[grid](x, weight, output, stride_batch, stride_row, N, eps)
 
     return output

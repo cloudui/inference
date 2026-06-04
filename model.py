@@ -1,0 +1,288 @@
+"""
+LLaMA 3 8B Inference Engine
+
+Minimal inference-only implementation targeting a single model architecture.
+No training, no gradient tracking, no HuggingFace abstractions.
+"""
+
+import torch
+import torch.nn.functional as F
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+import kernels.rmsnorm as rmsnorm
+import kernels.swiglu as swiglu
+import kernels.flash_decode as flash_decode_kernel
+import kernels.fused_rmsnorm_swiglu as fused_rmsnorm_swiglu_kernel
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+@dataclass
+class LlamaConfig:
+    hidden_size: int = 4096
+    num_hidden_layers: int = 32
+    num_attention_heads: int = 32       # Q heads
+    num_key_value_heads: int = 8        # KV heads (GQA)
+    intermediate_size: int = 14336
+    vocab_size: int = 128256
+    max_position_embeddings: int = 8192
+    rms_norm_eps: float = 1e-6
+    rope_theta: float = 500000.0
+    head_dim: int = 128                 # hidden_size // num_attention_heads
+
+
+# ── RoPE ──────────────────────────────────────────────────────────────────────
+
+def precompute_rope_freqs(
+    head_dim: int,
+    max_seq_len: int,
+    theta: float = 500000.0,
+    device: torch.device = torch.device("cuda"),
+) -> torch.Tensor:
+    """Precomputes the complex RoPE frequency table.
+
+    Returns:
+        Complex tensor of shape (max_seq_len, head_dim // 2) containing
+        cis(freq * position) values for rotary embedding.
+    """
+    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+    positions = torch.arange(max_seq_len, device=device).float()
+    # (max_seq_len, head_dim // 2)
+    freqs_table = torch.outer(positions, freqs)
+    return torch.polar(torch.ones_like(freqs_table), freqs_table)
+
+
+def apply_rope(
+    q: torch.Tensor, k: torch.Tensor, freqs_cis: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Applies rotary positional embeddings to Q and K tensors.
+
+    Args:
+        q: (batch, n_heads, seq_len, head_dim)
+        k: (batch, n_kv_heads, seq_len, head_dim)
+        freqs_cis: (seq_len, head_dim // 2) complex tensor from precompute_rope_freqs
+    
+    Returns:
+        Rotated (q, k) with same shapes as input.
+    """
+    raise NotImplementedError
+
+
+# ── RMSNorm ───────────────────────────────────────────────────────────────────
+
+class RMSNorm:
+    """Holds the learned scale weight for RMSNorm. Forward dispatches to kernel."""
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        self.eps = eps
+        self.weight = torch.ones(dim)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        return rmsnorm(x, self.weight, self.eps)
+
+
+# ── Attention ─────────────────────────────────────────────────────────────────
+
+class Attention:
+    """Multi-head attention with GQA support and KV cache for decode.
+
+    Weight shapes (no bias):
+        wq: (hidden_size, num_attention_heads * head_dim)
+        wk: (hidden_size, num_key_value_heads * head_dim)
+        wv: (hidden_size, num_key_value_heads * head_dim)
+        wo: (num_attention_heads * head_dim, hidden_size)
+    """
+
+    def __init__(self, config: LlamaConfig):
+        self.num_heads = config.num_attention_heads
+        self.num_kv_heads = config.num_key_value_heads
+        self.head_dim = config.head_dim
+        self.hidden_size = config.hidden_size
+
+        # Projection weights — populated by weight loading
+        self.wq = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
+        self.wk = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
+        self.wv = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
+        self.wo = torch.empty(self.num_heads * self.head_dim, config.hidden_size)
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        freqs_cis: torch.Tensor,
+        kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
+        cache_position: int = 0,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, seq_len, hidden_size)
+            freqs_cis: (seq_len, head_dim // 2) complex
+            kv_cache: optional (k_cache, v_cache) each (batch, n_kv_heads, max_seq_len, head_dim)
+            cache_position: write position in the KV cache (for decode step)
+        
+        Returns:
+            (batch, seq_len, hidden_size)
+        """
+        raise NotImplementedError
+
+
+# ── MLP (SwiGLU) ──────────────────────────────────────────────────────────────
+
+class MLP:
+    """LLaMA FFN: SwiGLU(x @ gate, x @ up) @ down.
+
+    Weight shapes (no bias):
+        w_gate: (hidden_size, intermediate_size)
+        w_up:   (hidden_size, intermediate_size)
+        w_down: (intermediate_size, hidden_size)
+    """
+
+    def __init__(self, config: LlamaConfig):
+        self.w_gate = torch.empty(config.hidden_size, config.intermediate_size)
+        self.w_up = torch.empty(config.hidden_size, config.intermediate_size)
+        self.w_down = torch.empty(config.intermediate_size, config.hidden_size)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, seq_len, hidden_size)
+        Returns:
+            (batch, seq_len, hidden_size)
+        """
+        # kernel dispatch
+        x = swiglu(x, self.w_gate)
+        x = x @ self.w_up
+        return x @ self.w_down
+
+
+
+# ── Decoder Layer ─────────────────────────────────────────────────────────────
+
+class DecoderLayer:
+    """Pre-norm transformer block: RMSNorm -> Attention + residual -> RMSNorm -> MLP + residual."""
+
+    def __init__(self, config: LlamaConfig, layer_idx: int):
+        self.layer_idx = layer_idx
+        self.self_attn = Attention(config)
+        self.mlp = MLP(config)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    def __call__(
+        self,
+        hidden_states: torch.Tensor,
+        freqs_cis: torch.Tensor,
+        kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
+        cache_position: int = 0,
+    ) -> torch.Tensor:
+        """
+        Args:
+            hidden_states: (batch, seq_len, hidden_size)
+        Returns:
+            (batch, seq_len, hidden_size)
+        """
+        residual = hidden_states
+        hidden_states = self.self_attn(hidden_states, freqs_cis, kv_cache, cache_position)
+        hidden_states = residual + hidden_states
+
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        return hidden_states
+
+
+# ── Full Model ────────────────────────────────────────────────────────────────
+
+class Llama:
+    """LLaMA 3 8B inference model.
+    
+    Architecture:
+        token_embed -> [DecoderLayer x num_hidden_layers] -> RMSNorm -> lm_head
+    """
+
+    def __init__(self, config: LlamaConfig):
+        self.config = config
+
+        # Token embedding: (vocab_size, hidden_size)
+        self.embed_tokens = torch.empty(config.vocab_size, config.hidden_size)
+
+        # Transformer layers
+        self.layers = [DecoderLayer(config, i) for i in range(config.num_hidden_layers)]
+
+        # Final norm + output projection
+        self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        # lm_head: (hidden_size, vocab_size) — often tied with embed_tokens
+        self.lm_head = torch.empty(config.hidden_size, config.vocab_size)
+
+        # Precomputed RoPE frequencies
+        self.freqs_cis = precompute_rope_freqs(
+            config.head_dim, config.max_position_embeddings, config.rope_theta
+        )
+
+    # ── KV Cache ──────────────────────────────────────────────────────────
+
+    def allocate_kv_cache(
+        self, batch_size: int = 1, max_seq_len: int | None = None, device: torch.device = torch.device("cuda")
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Pre-allocates KV cache for all layers.
+
+        Returns:
+            List of (k_cache, v_cache) tuples per layer, each of shape
+            (batch, num_kv_heads, max_seq_len, head_dim).
+        """
+        max_seq_len = max_seq_len or self.config.max_position_embeddings
+        caches = []
+        for _ in self.layers:
+            k_cache = torch.zeros(
+                batch_size, self.config.num_key_value_heads, max_seq_len, self.config.head_dim,
+                device=device, dtype=torch.float16,
+            )
+            v_cache = torch.zeros(
+                batch_size, self.config.num_key_value_heads, max_seq_len, self.config.head_dim,
+                device=device, dtype=torch.float16,
+            )
+            caches.append((k_cache, v_cache))
+        return caches
+
+    # ── Forward ───────────────────────────────────────────────────────────
+
+    @torch.inference_mode()
+    def forward(
+        self,
+        token_ids: torch.Tensor,
+        start_pos: int = 0,
+        kv_caches: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+    ) -> torch.Tensor:
+        """Run a forward pass (prefill or single-token decode).
+
+        Args:
+            token_ids: (batch, seq_len) token indices
+            start_pos: position offset for RoPE and KV cache writes
+            kv_caches: per-layer KV caches from allocate_kv_cache()
+
+        Returns:
+            Logits tensor of shape (batch, seq_len, vocab_size)
+        """
+        raise NotImplementedError
+
+    # ── Weight Loading ────────────────────────────────────────────────────
+
+    @staticmethod
+    def from_pretrained(model_path: str, device: torch.device = torch.device("cuda")) -> "Llama":
+        """Loads weights from a HuggingFace-format checkpoint directory.
+
+        Expects safetensors files and a config.json. Maps HF weight names
+        to our flat structure.
+
+        Args:
+            model_path: path to a directory containing safetensors + config.json
+            device: target device for all tensors
+        """
+        raise NotImplementedError
+
+    def _move_to_device(self, device: torch.device) -> None:
+        """Moves all weight tensors to the specified device."""
+        raise NotImplementedError
