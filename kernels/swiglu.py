@@ -78,7 +78,7 @@ def swiglu_native(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     return x * torch.nn.functional.silu(gate)
 
 
-def swiglu_triton(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+def swiglu(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     x_flatten = x.view(-1)
     gate_flatten = gate.view(-1)
     output = torch.empty_like(x_flatten)
