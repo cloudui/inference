@@ -53,16 +53,18 @@ def rmsnorm_kernel(
     x_ptr,
     weight_ptr,
     out_ptr,
-    stride,
+    stride_batch,
+    stride_row,
     N,
     eps,
     BLOCK_SIZE: tl.constexpr,
 ):
-    pid = tl.program_id(axis=0)
+    pid_batch = tl.program_id(axis=0)
+    pid_row = tl.program_id(axis=1)
 
     # Create block pointers for 1D row slices
     x_block_ptr = tl.make_block_ptr(
-        base=x_ptr + pid * stride,
+        base=x_ptr + pid_batch * stride_batch + pid_row * stride_row,
         shape=(N,),
         strides=(1,),
         offsets=(0,),
@@ -88,7 +90,7 @@ def rmsnorm_kernel(
 
     # Create block pointer for output
     out_block_ptr = tl.make_block_ptr(
-        base=out_ptr + pid * stride,
+        base=out_ptr + pid_batch * stride_batch + pid_row * stride_row,
         shape=(N,),
         strides=(1,),
         offsets=(0,),
@@ -100,7 +102,7 @@ def rmsnorm_kernel(
     tl.store(out_block_ptr, output, boundary_check=(0,))
 
 
-def rmsnorm_triton(
+def rmsnorm(
     x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
 ) -> torch.Tensor:
     N = x.shape[-1]
@@ -108,7 +110,7 @@ def rmsnorm_triton(
     output = torch.empty_like(x)
 
     # Grid runs over row dimension
-    grid = (x.shape[0],)
+    grid = (x.shape[0], x.shape[1])
     
     # Launch kernel; BLOCK_SIZE is omitted as it will be selected by the autotuner
     rmsnorm_kernel[grid](x, weight, output, stride, N, eps)
