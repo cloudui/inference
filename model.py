@@ -13,7 +13,7 @@ from pathlib import Path
 
 import kernels.rmsnorm as rmsnorm
 import kernels.swiglu as swiglu
-import kernels.flash_decode as flash_decode_kernel
+import kernels.flash_decode as flash_decode
 import kernels.fused_rmsnorm_swiglu as fused_rmsnorm_swiglu_kernel
 
 
@@ -53,9 +53,18 @@ def precompute_rope_freqs(
     freqs_table = torch.outer(positions, freqs)
     return torch.polar(torch.ones_like(freqs_table), freqs_table)
 
+def rotate_half(x: torch.Tensor):
+    """
+    Setup QK the RoPe rotation vectorization
+    """
+    # x: (bh, seqlen, head_dim)
+    x_tophalf = x[..., : x.shape[-1] // 2]
+    x_bottomhalf = x[..., x.shape[-1] // 2 : ]
+    return torch.concat((-x_bottomhalf, x_tophalf), dim=-1)
 
+# https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py
 def apply_rope(
-    q: torch.Tensor, k: torch.Tensor, freqs_cis: torch.Tensor
+    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Applies rotary positional embeddings to Q and K tensors.
 
@@ -67,7 +76,11 @@ def apply_rope(
     Returns:
         Rotated (q, k) with same shapes as input.
     """
-    raise NotImplementedError
+    # TODO: make sure batch dims match for rope ops
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+
+    return q_embed, k_embed
 
 
 # ── RMSNorm ───────────────────────────────────────────────────────────────────
@@ -124,7 +137,11 @@ class Attention:
         Returns:
             (batch, seq_len, hidden_size)
         """
-        raise NotImplementedError
+        q = apply_rope(x @ self.wq, freqs_cis)
+        k = apply_rope(x @ self.wk, freqs_cis)
+        v = x @ self.wk
+
+        fd_out = flash_decode(q, k, v)
 
 
 # ── MLP (SwiGLU) ──────────────────────────────────────────────────────────────
