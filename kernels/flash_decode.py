@@ -231,4 +231,5 @@ def flash_decode(
         head_dim,
     )
     
-    return mid_o, out
+    # return mid_o
+    return out
