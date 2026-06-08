@@ -14,12 +14,16 @@ def flash_decode_generation_kernel(
     seq_len,
     scale,
     head_dim,
+    stride_q_batch,
     stride_q_head,
+    stride_k_batch,
     stride_k_head,
     stride_k_seq,
+    stride_mid_o_batch,
     stride_mid_o_head,
     stride_mid_o_block,
     stride_mid_o_gqa,
+    stride_mid_lse_batch,
     stride_mid_lse_head,
     stride_mid_lse_block,
     stride_mid_lse_gqa,
@@ -27,37 +31,57 @@ def flash_decode_generation_kernel(
     BLOCK_HEAD_DIM: tl.constexpr,
     gqa_ratio: tl.constexpr,
 ):
-    # BLOCK_GQA represents the maximum query heads per KV head grouped in one thread block.
-    # It is hardcoded to 16 to match the GQA blocking size.
+    # BLOCK_GQA represents the GQA dimension size for tl.dot tensor core requirements.
     BLOCK_GQA: tl.constexpr = 16
 
     # Program axes
-    pid_head = tl.program_id(axis=0)  # Index of the KV head
-    pid_kv = tl.program_id(axis=1)    # Index of the KV block
+    pid_head = tl.program_id(axis=0)   # Index of the KV head
+    pid_kv = tl.program_id(axis=1)     # Index of the KV block
+    pid_batch = tl.program_id(axis=2)  # Index of the Batch
 
-    # Offsets for dimensions
-    offs_d = tl.arange(0, BLOCK_HEAD_DIM)
-    offs_gqa = tl.arange(0, BLOCK_GQA)
-    offs_kv = tl.arange(0, BLOCK_SEQ_KV)
+    # Base pointers with batch offsets
+    q_batch_ptr = q_ptr + pid_batch * stride_q_batch
+    k_batch_ptr = k_ptr + pid_batch * stride_k_batch
+    v_batch_ptr = v_ptr + pid_batch * stride_k_batch
+    mid_o_batch_ptr = mid_o_ptr + pid_batch * stride_mid_o_batch
+    mid_lse_batch_ptr = mid_lse_ptr + pid_batch * stride_mid_lse_batch
 
-    # Compute pointers for Q
-    # Q shape: (k_heads * gqa_ratio, 1, head_dim) -> accessed as GQA-blocked rows
-    q_start_offset = pid_head * gqa_ratio * stride_q_head
-    q_row_offsets = q_start_offset + offs_gqa * stride_q_head
-    q_offsets = q_row_offsets[:, None] + offs_d[None, :]
-    q_mask = (offs_gqa < gqa_ratio)[:, None] & (offs_d < BLOCK_HEAD_DIM)[None, :]
+    # Create block pointer for Q
+    q_start_ptr = q_batch_ptr + pid_head * gqa_ratio * stride_q_head
+    q_block_ptr = tl.make_block_ptr(
+        base=q_start_ptr,
+        shape=(gqa_ratio, head_dim),
+        strides=(stride_q_head, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_GQA, BLOCK_HEAD_DIM),
+        order=(1, 0)
+    )
 
-    # Compute pointers for K and V
-    # K/V shape: (k_heads, seq_len, head_dim)
-    k_start_offset = pid_head * stride_k_head + pid_kv * BLOCK_SEQ_KV * stride_k_seq
-    k_row_offsets = k_start_offset + offs_kv * stride_k_seq
-    k_offsets = k_row_offsets[:, None] + offs_d[None, :]
-    k_mask = (pid_kv * BLOCK_SEQ_KV + offs_kv < seq_len)[:, None] & (offs_d < head_dim)[None, :]
+    # Create block pointers for K and V
+    k_start_ptr = k_batch_ptr + pid_head * stride_k_head
+    v_start_ptr = v_batch_ptr + pid_head * stride_k_head
 
-    # Load Q, K, V
-    q = tl.load(q_ptr + q_offsets, mask=q_mask)
-    k = tl.load(k_ptr + k_offsets, mask=k_mask)
-    v = tl.load(v_ptr + k_offsets, mask=k_mask)
+    k_block_ptr = tl.make_block_ptr(
+        base=k_start_ptr,
+        shape=(seq_len, head_dim),
+        strides=(stride_k_seq, 1),
+        offsets=(pid_kv * BLOCK_SEQ_KV, 0),
+        block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
+        order=(1, 0)
+    )
+    v_block_ptr = tl.make_block_ptr(
+        base=v_start_ptr,
+        shape=(seq_len, head_dim),
+        strides=(stride_k_seq, 1),
+        offsets=(pid_kv * BLOCK_SEQ_KV, 0),
+        block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
+        order=(1, 0)
+    )
+
+    # Load blocks using boundary checks
+    q = tl.load(q_block_ptr, boundary_check=(0, 1))
+    k = tl.load(k_block_ptr, boundary_check=(0, 1))
+    v = tl.load(v_block_ptr, boundary_check=(0, 1))
 
     # Compute attention scores
     acc = tl.zeros((BLOCK_GQA, BLOCK_HEAD_DIM), dtype=tl.float32)
@@ -73,19 +97,28 @@ def flash_decode_generation_kernel(
     acc = tl.dot(exp_scores.to(tl.float16), v, acc) / sum_exp[:, None]
 
     # Store intermediate accumulator (Mid_O)
-    # Shape: (k_heads, n_blocks, gqa_ratio, head_dim)
-    mid_o_start_offset = pid_head * stride_mid_o_head + pid_kv * stride_mid_o_block
-    mid_o_rows = mid_o_start_offset + offs_gqa * stride_mid_o_gqa
-    mid_o_offsets = mid_o_rows[:, None] + offs_d[None, :]
-    mid_o_mask = (offs_gqa < gqa_ratio)[:, None] & (offs_d < BLOCK_HEAD_DIM)[None, :]
-    tl.store(mid_o_ptr + mid_o_offsets, acc.to(tl.float16), mask=mid_o_mask)
+    mid_o_start_ptr = mid_o_batch_ptr + pid_head * stride_mid_o_head + pid_kv * stride_mid_o_block
+    mid_o_block_ptr = tl.make_block_ptr(
+        base=mid_o_start_ptr,
+        shape=(gqa_ratio, BLOCK_HEAD_DIM),
+        strides=(stride_mid_o_gqa, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_GQA, BLOCK_HEAD_DIM),
+        order=(1, 0)
+    )
+    tl.store(mid_o_block_ptr, acc.to(tl.float16), boundary_check=(0, 1))
 
     # Store intermediate LSE (Mid_LSE)
-    # Shape: (k_heads, n_blocks, gqa_ratio)
-    mid_lse_start_offset = pid_head * stride_mid_lse_head + pid_kv * stride_mid_lse_block
-    mid_lse_offsets = mid_lse_start_offset + offs_gqa * stride_mid_lse_gqa
-    mid_lse_mask = offs_gqa < gqa_ratio
-    tl.store(mid_lse_ptr + mid_lse_offsets, lse, mask=mid_lse_mask)
+    mid_lse_start_ptr = mid_lse_batch_ptr + pid_head * stride_mid_lse_head + pid_kv * stride_mid_lse_block
+    mid_lse_block_ptr = tl.make_block_ptr(
+        base=mid_lse_start_ptr,
+        shape=(gqa_ratio,),
+        strides=(stride_mid_lse_gqa,),
+        offsets=(0,),
+        block_shape=(BLOCK_GQA,),
+        order=(0,)
+    )
+    tl.store(mid_lse_block_ptr, lse, boundary_check=(0,))
 
 
 @triton.jit
@@ -95,39 +128,53 @@ def flash_decode_reduce_kernel(
     out_ptr,              # Final output tensor (O)
     gqa_ratio,            # Number of Q heads per KV head (for Grouped-Query Attention)
     n_blocks,             # Number of split-KV blocks that were reduced over
-    stride_mid_o_head,    # Strides for the intermediate Output tensor
+    stride_mid_o_batch,   # Strides for intermediate Output tensor
+    stride_mid_o_head,    
     stride_mid_o_gqa,
     stride_mid_o_block,
-    stride_mid_lse_head,  # Strides for the intermediate LSE tensor
+    stride_mid_lse_batch, # Strides for intermediate LSE tensor
+    stride_mid_lse_head,  
     stride_mid_lse_gqa,
     stride_mid_lse_block,
-    stride_out_head,      # Stride for the final Output tensor
+    stride_out_batch,     # Strides for final Output tensor
+    stride_out_head,      
     BLOCK_HEAD_DIM: tl.constexpr,
 ):
     pid_q_head = tl.program_id(axis=0)
+    pid_batch = tl.program_id(axis=1)
+
+    # Base pointers with batch offsets
+    mid_o_batch_ptr = mid_o_ptr + pid_batch * stride_mid_o_batch
+    mid_lse_batch_ptr = mid_lse_ptr + pid_batch * stride_mid_lse_batch
+    out_batch_ptr = out_ptr + pid_batch * stride_out_batch
 
     # Determine which KV head and query subhead within the GQA group this thread processes
     kv_head_idx = pid_q_head // gqa_ratio
     q_subhead_idx = pid_q_head % gqa_ratio
     
-    # Compute base pointer offset for reading intermediate output blocks
-    mid_o_start_offset = kv_head_idx * stride_mid_o_head + q_subhead_idx * stride_mid_o_gqa
-    offs_d = tl.arange(0, BLOCK_HEAD_DIM)
+    # Base pointers for this GQA head
+    mid_o_start_ptr = mid_o_batch_ptr + kv_head_idx * stride_mid_o_head + q_subhead_idx * stride_mid_o_gqa
+    mid_lse_start_ptr = mid_lse_batch_ptr + kv_head_idx * stride_mid_lse_head + q_subhead_idx * stride_mid_lse_gqa
 
     # Initialize running softmax statistics (LSE accumulator and output accumulator)
     lse_accum = tl.full([1], float("-inf"), dtype=tl.float32)
-    mid_lse_start_offset = kv_head_idx * stride_mid_lse_head + q_subhead_idx * stride_mid_lse_gqa
     out_accum = tl.zeros([BLOCK_HEAD_DIM], dtype=tl.float32)
 
     # Loop over all split-KV blocks to reduce them online
     for block_idx in tl.range(n_blocks):
-        # Compute pointer offsets for the current block
-        mid_o_row_offsets = mid_o_start_offset + block_idx * stride_mid_o_block
-        mid_o_offsets = mid_o_row_offsets + offs_d
+        # Load block intermediate output using block pointer (exact size BLOCK_HEAD_DIM)
+        mid_o_block_ptr = tl.make_block_ptr(
+            base=mid_o_start_ptr + block_idx * stride_mid_o_block,
+            shape=(BLOCK_HEAD_DIM,),
+            strides=(1,),
+            offsets=(0,),
+            block_shape=(BLOCK_HEAD_DIM,),
+            order=(0,)
+        )
+        block_acc = tl.load(mid_o_block_ptr)
 
-        # Load intermediate values for the current block
-        block_acc = tl.load(mid_o_ptr + mid_o_offsets)
-        block_lse = tl.load(mid_lse_ptr + mid_lse_start_offset + block_idx * stride_mid_lse_block)
+        # Load scalar block LSE
+        block_lse = tl.load(mid_lse_start_ptr + block_idx * stride_mid_lse_block)
 
         # Update Log-Sum-Exp
         max_lse = tl.maximum(lse_accum, block_lse)
@@ -141,27 +188,33 @@ def flash_decode_reduce_kernel(
         lse_accum = new_lse
 
     # Write out final reduced values
-    out_offsets = pid_q_head * stride_out_head + offs_d
-    tl.store(out_ptr + out_offsets, out_accum.to(tl.float16))
+    out_block_ptr = tl.make_block_ptr(
+        base=out_batch_ptr + pid_q_head * stride_out_head,
+        shape=(BLOCK_HEAD_DIM,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(BLOCK_HEAD_DIM,),
+        order=(0,)
+    )
+    tl.store(out_block_ptr, out_accum.to(tl.float16))
     
 
 def flash_decode(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """Computes Grouped-Query Attention (GQA) using a Split-KV flash decoding approach.
     
     Args:
-        q: Query tensor of shape (q_heads, 1, head_dim)
-        k: Key tensor of shape (k_heads, seq_len, head_dim)
-        v: Value tensor of shape (k_heads, seq_len, head_dim)
+        q: Query tensor of shape (batch_size, q_heads, 1, head_dim)
+        k: Key tensor of shape (batch_size, k_heads, seq_len, head_dim)
+        v: Value tensor of shape (batch_size, k_heads, seq_len, head_dim)
         
     Returns:
-        A tuple of (mid_o, out):
-            mid_o: Intermediate accumulator tensor of shape (k_heads, n_blocks, gqa_ratio, head_dim)
-            out: Final reduced output tensor of shape (q_heads, 1, head_dim)
+        Final reduced output tensor of shape (batch_size, q_heads, 1, head_dim)
     """
-    q_heads = q.shape[0]
-    k_heads, seq_len, head_dim = k.shape
+    batch_size = q.shape[0]
+    q_heads = q.shape[1]
+    k_heads, seq_len, head_dim = k.shape[1], k.shape[2], k.shape[3]
     
     BLOCK_SEQ_KV = 64
     n_blocks = triton.cdiv(seq_len, BLOCK_SEQ_KV)
@@ -169,22 +222,27 @@ def flash_decode(
     
     # Allocate intermediate output and LSE buffers
     mid_o = torch.zeros(
-        (k_heads, n_blocks, gqa_ratio, head_dim), 
+        (batch_size, k_heads, n_blocks, gqa_ratio, head_dim), 
         device=q.device, 
         dtype=torch.float16
     )
     mid_lse = torch.zeros(
-        (k_heads, n_blocks, gqa_ratio), 
+        (batch_size, k_heads, n_blocks, gqa_ratio), 
         device=q.device, 
-        dtype=torch.float16
+        dtype=torch.float32
     )
     
     scale = 1 / math.sqrt(head_dim)
     
+    # Stride calculation for input and intermediate tensors
+    stride_q_batch, stride_q_head, _, _ = q.stride()
+    stride_k_batch, stride_k_head, stride_k_seq, _ = k.stride()
+    
+    stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
+    stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
+    
     # Launch Generation Kernel
-    grid_gen = (k_heads, n_blocks)
-    stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
-    stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
+    grid_gen = (k_heads, n_blocks, batch_size)
     
     flash_decode_generation_kernel[grid_gen](
         q,
@@ -195,12 +253,16 @@ def flash_decode(
         seq_len,
         scale,
         head_dim,
-        q.stride()[0],
-        k.stride()[0],
-        k.stride()[1],
+        stride_q_batch,
+        stride_q_head,
+        stride_k_batch,
+        stride_k_head,
+        stride_k_seq,
+        stride_mid_o_batch,
         stride_mid_o_head,
         stride_mid_o_block,
         stride_mid_o_gqa,
+        stride_mid_lse_batch,
         stride_mid_lse_head,
         stride_mid_lse_block,
         stride_mid_lse_gqa,
@@ -212,8 +274,9 @@ def flash_decode(
     torch.cuda.synchronize()
     
     # Launch Reduction Kernel
-    out = torch.zeros((q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
-    grid_reduce = (q_heads,)
+    out = torch.zeros((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
+    grid_reduce = (q_heads, batch_size)
+    stride_out_batch, stride_out_head, _, _ = out.stride()
     
     flash_decode_reduce_kernel[grid_reduce](
         mid_o,
@@ -221,15 +284,17 @@ def flash_decode(
         out,
         gqa_ratio,
         n_blocks,
+        stride_mid_o_batch,
         stride_mid_o_head,
         stride_mid_o_gqa,
         stride_mid_o_block,
+        stride_mid_lse_batch,
         stride_mid_lse_head,
         stride_mid_lse_gqa,
         stride_mid_lse_block,
-        out.stride()[0],
+        stride_out_batch,
+        stride_out_head,
         head_dim,
     )
     
-    # return mid_o
     return out
