@@ -51,3 +51,4 @@ triton_cache/
 build/
 dist/
 *.so
+*.egg-info/
