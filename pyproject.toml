@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inference"
+version = "0.1.0"
+description = "High-performance inference engine with custom Triton kernels"
+dependencies = [
+    "torch",
+    "triton",
+    "transformers"
+]
+
+[tool.setuptools]
+packages = ["kernels"]
+py-modules = ["model"]
