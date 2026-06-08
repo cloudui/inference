@@ -87,6 +87,12 @@ def flash_decode_generation_kernel(
     acc = tl.zeros((BLOCK_GQA, BLOCK_HEAD_DIM), dtype=tl.float32)
     attn_scores = tl.dot(q, tl.trans(k)) * scale
 
+    # Mask rows attention to -inf (seqlen mod BLOCK_SEQ_KV != 0)
+    # for out-of-bounds rows. exp(-inf) = 0
+    kv_indices = pid_kv * BLOCK_SEQ_KV + tl.arange(0, BLOCK_SEQ_KV)
+    kv_mask = kv_indices[None, :] < seq_len
+    attn_scores = tl.where(kv_mask, attn_scores, float("-inf"))
+
     # Softmax calculation
     max_scores = tl.max(attn_scores, axis=-1)
     exp_scores = tl.exp(attn_scores - max_scores[:, None])
