@@ -1,0 +1,14 @@
+# incomplete (w/o versions), just a list for now to remember
+pytest
+torch
+triton
+
+# HF
+transformers
+
+# benching
+xformers
+
+# CUDA
+# cuda12/13 
+
