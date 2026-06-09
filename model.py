@@ -5,6 +5,8 @@ Minimal inference-only implementation targeting a single model architecture.
 No training, no gradient tracking, no HuggingFace abstractions.
 """
 
+from IPython.core import extensions
+from IPython.core import extensions
 import torch
 import torch.nn.functional as F
 import math
@@ -123,7 +125,7 @@ class Attention:
     def __call__(
         self,
         x: torch.Tensor,
-        freqs_cis: torch.Tensor,
+        rope_embeds: tuple[torch.Tensor, torch.Tensor],
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int = 0,
     ) -> torch.Tensor:
@@ -137,12 +139,25 @@ class Attention:
         Returns:
             (batch, seq_len, hidden_size)
         """
-        q = apply_rope(x @ self.wq, freqs_cis)
-        k = apply_rope(x @ self.wk, freqs_cis)
-        v = x @ self.wk
+        cos, sin = rope_embeds
 
-        fd_out = flash_decode(q, k, v)
+        hidden_shape = (x.shape[0], x.shape[1], -1, self.head_dim,)
 
+        # (b, seqlen, heads, head_dim)
+        q = (x @ self.wq).view(hidden_shape).transpose(1, 2)
+        k = (x @ self.wk).view(hidden_shape).transpose(1, 2)
+
+        q, k = apply_rope(q, k, cos, sin)
+        v = (x @ self.wv).view(hidden_shape).transpose(1, 2)
+
+        K, V = kv_cache
+        K[:, :, cache_position:cache_position+1] = k
+        V[:, :, cache_position:cache_position+1] = v
+
+        fd_out = flash_decode(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1])
+        out = fd_out.transpose(1, 2).reshape(x.shape).contiguous() @ self.wo
+        
+        return out
 
 # ── MLP (SwiGLU) ──────────────────────────────────────────────────────────────
 
