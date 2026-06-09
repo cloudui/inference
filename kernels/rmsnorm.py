@@ -99,8 +99,7 @@ def rmsnorm_kernel(
     )
 
     # Store computed values using block pointer
-    tl.store(out_block_ptr, output, boundary_check=(0,))
-
+    tl.store(out_block_ptr, output.to(tl.float16), boundary_check=(0,))
 
 def rmsnorm(
     x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
