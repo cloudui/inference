@@ -73,12 +73,10 @@ def apply_rope(
     Args:
         q: (batch, n_heads, seq_len, head_dim)
         k: (batch, n_kv_heads, seq_len, head_dim)
-        freqs_cis: (seq_len, head_dim // 2) complex tensor from precompute_rope_freqs
-    
-    Returns:
-        Rotated (q, k) with same shapes as input.
+        cos, sin: (batch, seqlen, head_dim)
     """
     # TODO: make sure batch dims match for rope ops
+    # works for now
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
 
