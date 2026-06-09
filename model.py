@@ -181,10 +181,8 @@ class MLP:
             (batch, seq_len, hidden_size)
         """
         # kernel dispatch
-        x = swiglu(x, self.w_gate)
-        x = x @ self.w_up
+        x = swiglu(x @ self.w_up, x @ self.w_gate)
         return x @ self.w_down
-
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -213,6 +211,7 @@ class DecoderLayer:
             (batch, seq_len, hidden_size)
         """
         residual = hidden_states
+        hidden_states = self.input_layernorm(hidden_states)
         hidden_states = self.self_attn(hidden_states, freqs_cis, kv_cache, cache_position)
         hidden_states = residual + hidden_states
 
