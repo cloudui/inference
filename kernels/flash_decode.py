@@ -35,9 +35,9 @@ def flash_decode_generation_kernel(
     BLOCK_GQA: tl.constexpr = 16
 
     # Program axes
-    pid_head = tl.program_id(axis=0)   # Index of the KV head
-    pid_kv = tl.program_id(axis=1)     # Index of the KV block
-    pid_batch = tl.program_id(axis=2)  # Index of the Batch
+    pid_batch = tl.program_id(axis=0)  # Index of the Batch
+    pid_head = tl.program_id(axis=1)   # Index of the KV head
+    pid_kv = tl.program_id(axis=2)     # Index of the KV block
 
     # Base pointers with batch offsets
     q_batch_ptr = q_ptr + pid_batch * stride_q_batch
@@ -146,8 +146,8 @@ def flash_decode_reduce_kernel(
     stride_out_head,      
     BLOCK_HEAD_DIM: tl.constexpr,
 ):
-    pid_q_head = tl.program_id(axis=0)
-    pid_batch = tl.program_id(axis=1)
+    pid_batch = tl.program_id(axis=0)
+    pid_q_head = tl.program_id(axis=1)
 
     # Base pointers with batch offsets
     mid_o_batch_ptr = mid_o_ptr + pid_batch * stride_mid_o_batch
@@ -248,7 +248,7 @@ def flash_decode(
     stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
     
     # Launch Generation Kernel
-    grid_gen = (k_heads, n_blocks, batch_size)
+    grid_gen = (batch_size, k_heads, n_blocks)
     
     flash_decode_generation_kernel[grid_gen](
         q,
@@ -281,7 +281,7 @@ def flash_decode(
     
     # Launch Reduction Kernel
     out = torch.zeros((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
-    grid_reduce = (q_heads, batch_size)
+    grid_reduce = (batch_size, q_heads)
     stride_out_batch, stride_out_head, _, _ = out.stride()
     
     flash_decode_reduce_kernel[grid_reduce](
