@@ -5,6 +5,12 @@ Minimal inference-only implementation targeting a single model architecture.
 No training, no gradient tracking, no HuggingFace abstractions.
 """
 
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
+from huggingface_hub.inference._generated.types import zero_shot_image_classification
 from IPython.core import extensions
 from IPython.core import extensions
 import torch
@@ -153,7 +159,7 @@ class Attention:
         V[:, :, cache_position:cache_position+1] = v
 
         fd_out = flash_decode(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1])
-        out = fd_out.transpose(1, 2).reshape(x.shape).contiguous() @ self.wo
+        out = fd_out.transpose(1, 2).reshape(x.shape) @ self.wo
         
         return out
 
@@ -200,7 +206,7 @@ class DecoderLayer:
     def __call__(
         self,
         hidden_states: torch.Tensor,
-        freqs_cis: torch.Tensor,
+        rope_embeds: tuple[torch.Tensor, torch.Tensor],
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int = 0,
     ) -> torch.Tensor:
@@ -212,7 +218,7 @@ class DecoderLayer:
         """
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        hidden_states = self.self_attn(hidden_states, freqs_cis, kv_cache, cache_position)
+        hidden_states = self.self_attn(hidden_states, rope_embeds, kv_cache, cache_position)
         hidden_states = residual + hidden_states
 
         residual = hidden_states
@@ -247,9 +253,14 @@ class Llama:
         self.lm_head = torch.empty(config.hidden_size, config.vocab_size)
 
         # Precomputed RoPE frequencies
-        self.freqs_cis = precompute_rope_freqs(
+        freqs_cis = precompute_rope_freqs(
             config.head_dim, config.max_position_embeddings, config.rope_theta
         )
+
+        cos = torch.cat([freqs_cis.real, freqs_cis.real], dim=-1)  # (max_seq, head_dim)
+        sin = torch.cat([freqs_cis.imag, freqs_cis.imag], dim=-1)
+        self.cos = cos.half()  # or .bfloat16() when you switch
+        self.sin = sin.half()
 
     # ── KV Cache ──────────────────────────────────────────────────────────
 
@@ -295,7 +306,23 @@ class Llama:
         Returns:
             Logits tensor of shape (batch, seq_len, vocab_size)
         """
-        raise NotImplementedError
+        hidden_states = self.embed_tokens[token_ids]
+
+        cos = self.cos[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
+        sin = self.sin[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
+
+        for i, layer in enumerate(self.layers):
+            hidden_states = layer(
+                hidden_states, 
+                rope_embeds=(cos, sin),
+                kv_cache=kv_caches[i],
+                cache_position=start_pos
+            )
+        
+        x = self.norm(hidden_states)
+        out = x @ self.lm_head
+
+        return out
 
     # ── Weight Loading ────────────────────────────────────────────────────
 
