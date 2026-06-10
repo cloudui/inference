@@ -276,8 +276,6 @@ def flash_decode(
         head_dim,
         gqa_ratio,
     )
-
-    torch.cuda.synchronize()
     
     # Launch Reduction Kernel
     out = torch.zeros((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
