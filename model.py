@@ -5,19 +5,13 @@ Minimal inference-only implementation targeting a single model architecture.
 No training, no gradient tracking, no HuggingFace abstractions.
 """
 
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from huggingface_hub.inference._generated.types import zero_shot_image_classification
-from IPython.core import extensions
-from IPython.core import extensions
+import json
 import torch
 import torch.nn.functional as F
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from safetensors.torch import load_file
 
 import kernels.rmsnorm as rmsnorm
 import kernels.swiglu as swiglu
@@ -337,8 +331,82 @@ class Llama:
             model_path: path to a directory containing safetensors + config.json
             device: target device for all tensors
         """
-        raise NotImplementedError
+        model_dir = Path(model_path)
+
+        # ── Load config ──────────────────────────────────────────────────
+        with open(model_dir / "config.json") as f:
+            raw = json.load(f)
+
+        config = LlamaConfig(
+            hidden_size=raw["hidden_size"],
+            num_hidden_layers=raw["num_hidden_layers"],
+            num_attention_heads=raw["num_attention_heads"],
+            num_key_value_heads=raw["num_key_value_heads"],
+            intermediate_size=raw["intermediate_size"],
+            vocab_size=raw["vocab_size"],
+            max_position_embeddings=raw["max_position_embeddings"],
+            rms_norm_eps=raw.get("rms_norm_eps", 1e-6),
+            rope_theta=raw.get("rope_theta", 500000.0),
+            head_dim=raw["hidden_size"] // raw["num_attention_heads"],
+        )
+
+        model = Llama(config)
+
+        # ── Load safetensors shards ──────────────────────────────────────
+        state_dict = {}
+        for f in sorted(model_dir.glob("*.safetensors")):
+            state_dict.update(load_file(str(f), device="cpu"))
+
+        # ── Map weights ──────────────────────────────────────────────────
+        # Embedding and final norm (no transpose)
+        model.embed_tokens = state_dict["model.embed_tokens.weight"]
+        model.norm.weight = state_dict["model.norm.weight"]
+
+        # lm_head: HF (vocab, hidden) → custom (hidden, vocab)
+        if "lm_head.weight" in state_dict:
+            model.lm_head = state_dict["lm_head.weight"].T
+        else:
+            # Weight-tied models share embed_tokens
+            model.lm_head = model.embed_tokens.T
+
+        # Per-layer weights
+        for i in range(config.num_hidden_layers):
+            p = f"model.layers.{i}."
+            layer = model.layers[i]
+
+            # Attention projections: HF (out, in) → custom (in, out)
+            layer.self_attn.wq = state_dict[p + "self_attn.q_proj.weight"].T
+            layer.self_attn.wk = state_dict[p + "self_attn.k_proj.weight"].T
+            layer.self_attn.wv = state_dict[p + "self_attn.v_proj.weight"].T
+            layer.self_attn.wo = state_dict[p + "self_attn.o_proj.weight"].T
+
+            # Norms (1-D, no transpose)
+            layer.input_layernorm.weight = state_dict[p + "input_layernorm.weight"]
+            layer.post_attention_layernorm.weight = state_dict[p + "post_attention_layernorm.weight"]
+
+            # MLP projections: HF (out, in) → custom (in, out)
+            layer.mlp.w_gate = state_dict[p + "mlp.gate_proj.weight"].T
+            layer.mlp.w_up = state_dict[p + "mlp.up_proj.weight"].T
+            layer.mlp.w_down = state_dict[p + "mlp.down_proj.weight"].T
+
+        model._move_to_device(device)
+        return model
 
     def _move_to_device(self, device: torch.device) -> None:
         """Moves all weight tensors to the specified device."""
-        raise NotImplementedError
+        self.embed_tokens = self.embed_tokens.to(device)
+        self.lm_head = self.lm_head.to(device)
+        self.norm.weight = self.norm.weight.to(device)
+        self.cos = self.cos.to(device)
+        self.sin = self.sin.to(device)
+
+        for layer in self.layers:
+            layer.self_attn.wq = layer.self_attn.wq.to(device)
+            layer.self_attn.wk = layer.self_attn.wk.to(device)
+            layer.self_attn.wv = layer.self_attn.wv.to(device)
+            layer.self_attn.wo = layer.self_attn.wo.to(device)
+            layer.input_layernorm.weight = layer.input_layernorm.weight.to(device)
+            layer.post_attention_layernorm.weight = layer.post_attention_layernorm.weight.to(device)
+            layer.mlp.w_gate = layer.mlp.w_gate.to(device)
+            layer.mlp.w_up = layer.mlp.w_up.to(device)
+            layer.mlp.w_down = layer.mlp.w_down.to(device)
