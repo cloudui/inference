@@ -148,7 +148,7 @@ def test_single_decode_step(cache_position):
 
         custom_hidden = custom_layer(
             hidden_states=x,
-            freqs_cis=(cos, sin),
+            rope_embeds=(cos, sin),
             kv_cache=(k_cache, v_cache),
             cache_position=cache_position,
         )
@@ -187,7 +187,7 @@ def test_multi_step_decode():
 
             custom_hidden = custom_layer(
                 hidden_states=x,
-                freqs_cis=(cos, sin),
+                rope_embeds=(cos, sin),
                 kv_cache=(k_cache, v_cache),
                 cache_position=step,
             )
