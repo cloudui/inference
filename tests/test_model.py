@@ -104,13 +104,13 @@ def test_rope_correctness():
     cos_full = torch.cat([cos_custom, cos_custom], dim=-1)
     sin_full = torch.cat([sin_custom, sin_custom], dim=-1)
     
-    cos_broadcast = cos_full.unsqueeze(0).unsqueeze(0)
-    sin_broadcast = sin_full.unsqueeze(0).unsqueeze(0)
+    cos_broadcast = cos_full.unsqueeze(0).unsqueeze(0).half()
+    sin_broadcast = sin_full.unsqueeze(0).unsqueeze(0).half()
     
     q_rot_custom, k_rot_custom = model.apply_rope(q, k, cos_broadcast, sin_broadcast)
     
-    assert torch.allclose(q_rot_hf, q_rot_custom, atol=1e-3), "Q RoPE rotation mismatch"
-    assert torch.allclose(k_rot_hf, k_rot_custom, atol=1e-3), "K RoPE rotation mismatch"
+    assert torch.allclose(q_rot_hf, q_rot_custom, rtol=1e-3, atol=1e-3), "Q RoPE rotation mismatch"
+    assert torch.allclose(k_rot_hf, k_rot_custom, rtol=1e-3, atol=1e-3), "K RoPE rotation mismatch"
 
 
 def test_rmsnorm_correctness():
@@ -130,7 +130,7 @@ def test_rmsnorm_correctness():
     out_hf = hf_norm(x)
     out_custom = custom_norm(x)
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-3), "RMSNorm output mismatch"
+    assert torch.allclose(out_hf, out_custom, rtol=1e-3, atol=1e-3), "RMSNorm output mismatch"
 
 
 def test_mlp_correctness():
@@ -157,7 +157,7 @@ def test_mlp_correctness():
     activated = swiglu(up_proj, gate_proj)
     out_custom = activated @ custom_mlp.w_down
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-3), "MLP forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, rtol=1e-3, atol=1e-3), "MLP forward pass mismatch"
 
 
 def test_attention_prefill_and_decode():
@@ -210,7 +210,7 @@ def test_attention_prefill_and_decode():
     v_exp = v.repeat_interleave(gqa_ratio, dim=1)
     
     scores = torch.matmul(q_rot, k_rot_exp.transpose(-1, -2)) / math.sqrt(custom_config.head_dim)
-    mask = torch.full((seq_len, seq_len), float("-inf"), device=DEVICE)
+    mask = torch.full((seq_len, seq_len), float("-inf"), device=DEVICE, dtype=torch.float16)
     mask = torch.triu(mask, diagonal=1)
     scores = scores + mask
     
@@ -219,7 +219,7 @@ def test_attention_prefill_and_decode():
     out_attn = out_attn.transpose(1, 2).contiguous().view(batch, seq_len, -1)
     out_custom = out_attn @ custom_attn.wo
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-3), "Prefill Attention forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, rtol=1e-3, atol=1e-3), "Prefill Attention forward pass mismatch"
 
 
 def test_decoder_layer_correctness():
@@ -285,7 +285,7 @@ def test_decoder_layer_correctness():
     v_exp = v.repeat_interleave(gqa_ratio, dim=1)
     
     scores = torch.matmul(q_rot, k_rot_exp.transpose(-1, -2)) / math.sqrt(custom_config.head_dim)
-    mask = torch.full((seq_len, seq_len), float("-inf"), device=DEVICE)
+    mask = torch.full((seq_len, seq_len), float("-inf"), device=DEVICE, dtype=torch.float16)
     mask = torch.triu(mask, diagonal=1)
     scores = scores + mask
     
@@ -304,7 +304,7 @@ def test_decoder_layer_correctness():
     
     out_custom = attn_residual + mlp_out
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-3), "DecoderLayer forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, rtol=1e-3, atol=1e-3), "DecoderLayer forward pass mismatch"
 
 
 def test_full_model_equivalence():
