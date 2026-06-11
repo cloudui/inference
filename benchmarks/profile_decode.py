@@ -137,8 +137,8 @@ def profiled_forward(model: Llama, token_ids: torch.Tensor, start_pos: int,
                     V[:, :, start_pos:start_pos+1] = v
 
                 with record_function(f"layer_{i}/attn/flash_decode"):
-                    import kernels.flash_decode as fd_module
-                    fd_out = fd_module.flash_decode(
+                    from kernels import flash_decode
+                    fd_out = flash_decode(
                         q, K[:, :, :start_pos+1], V[:, :, :start_pos+1]
                     )
 
@@ -157,8 +157,8 @@ def profiled_forward(model: Llama, token_ids: torch.Tensor, start_pos: int,
                     gate = normed2 @ layer.mlp.w_gate
 
                 with record_function(f"layer_{i}/mlp/swiglu"):
-                    import kernels.swiglu as swiglu_module
-                    act = swiglu_module.swiglu(up, gate)
+                    from kernels import swiglu
+                    act = swiglu(up, gate)
 
                 with record_function(f"layer_{i}/mlp/down_proj"):
                     mlp_out = act @ layer.mlp.w_down

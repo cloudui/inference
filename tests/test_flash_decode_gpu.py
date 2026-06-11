@@ -6,7 +6,7 @@ import os
 # Add parent directory to sys.path so we can import from kernels
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from kernels.flash_decode import flash_decode
+from kernels import flash_decode
 
 import torch
 import torch.nn.functional as F

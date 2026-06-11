@@ -27,9 +27,7 @@ from transformers.models.llama.modeling_llama import (
 # Import custom model classes and kernels
 import model
 from model import LlamaConfig, RMSNorm, Attention, MLP, DecoderLayer, Llama
-import kernels.rmsnorm as rmsnorm_kernel
-import kernels.swiglu as swiglu_kernel
-import kernels.flash_decode as flash_decode_kernel
+from kernels import rmsnorm, swiglu, flash_decode
 
 DEVICE = torch.device("cuda")
 
@@ -156,7 +154,7 @@ def test_mlp_correctness():
     # Custom MLP simulation (based on standard LLama MLP implementation)
     gate_proj = x @ custom_mlp.w_gate
     up_proj = x @ custom_mlp.w_up
-    activated = swiglu_kernel.swiglu(up_proj, gate_proj)
+    activated = swiglu(up_proj, gate_proj)
     out_custom = activated @ custom_mlp.w_down
     
     assert torch.allclose(out_hf, out_custom, atol=1e-5), "MLP forward pass mismatch"
@@ -299,7 +297,7 @@ def test_decoder_layer_correctness():
     norm_attn = custom_layer.post_attention_layernorm(attn_residual)
     gate_proj = norm_attn @ custom_layer.mlp.w_gate
     up_proj = norm_attn @ custom_layer.mlp.w_up
-    activated = swiglu_kernel.swiglu(up_proj, gate_proj)
+    activated = swiglu(up_proj, gate_proj)
     mlp_out = activated @ custom_layer.mlp.w_down
     
     out_custom = attn_residual + mlp_out
