@@ -4,7 +4,7 @@ torch
 triton
 
 # HF
-transformers
+transformers==11.5.0
 
 # benching
 xformers
