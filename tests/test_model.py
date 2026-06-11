@@ -81,10 +81,10 @@ def test_rope_correctness():
     seq_len = 16
     batch = 2
     
-    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE)
+    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE, dtype=torch.float16)
     
-    q = torch.randn(batch, custom_config.num_attention_heads, seq_len, custom_config.head_dim, device=DEVICE)
-    k = torch.randn(batch, custom_config.num_key_value_heads, seq_len, custom_config.head_dim, device=DEVICE)
+    q = torch.randn(batch, custom_config.num_attention_heads, seq_len, custom_config.head_dim, device=DEVICE, dtype=torch.float16)
+    k = torch.randn(batch, custom_config.num_key_value_heads, seq_len, custom_config.head_dim, device=DEVICE, dtype=torch.float16)
     position_ids = torch.arange(seq_len, device=DEVICE).unsqueeze(0).expand(batch, -1)
     
     cos, sin = hf_rotary(q, position_ids)
@@ -109,8 +109,8 @@ def test_rope_correctness():
     
     q_rot_custom, k_rot_custom = model.apply_rope(q, k, cos_broadcast, sin_broadcast)
     
-    assert torch.allclose(q_rot_hf, q_rot_custom, atol=1e-5), "Q RoPE rotation mismatch"
-    assert torch.allclose(k_rot_hf, k_rot_custom, atol=1e-5), "K RoPE rotation mismatch"
+    assert torch.allclose(q_rot_hf, q_rot_custom, atol=1e-3), "Q RoPE rotation mismatch"
+    assert torch.allclose(k_rot_hf, k_rot_custom, atol=1e-3), "K RoPE rotation mismatch"
 
 
 def test_rmsnorm_correctness():
@@ -118,26 +118,26 @@ def test_rmsnorm_correctness():
     hf_config, custom_config = get_test_configs()
     dim = custom_config.hidden_size
     
-    hf_norm = LlamaRMSNorm(hidden_size=dim, eps=custom_config.rms_norm_eps).to(DEVICE)
+    hf_norm = LlamaRMSNorm(hidden_size=dim, eps=custom_config.rms_norm_eps).to(DEVICE, dtype=torch.float16)
     with torch.no_grad():
         hf_norm.weight.normal_(mean=1.0, std=0.1)
         
     custom_norm = RMSNorm(dim=dim, eps=custom_config.rms_norm_eps)
     custom_norm.weight = hf_norm.weight.clone().detach().to(DEVICE)
     
-    x = torch.randn(4, 32, dim, device=DEVICE)
+    x = torch.randn(4, 32, dim, device=DEVICE, dtype=torch.float16)
     
     out_hf = hf_norm(x)
     out_custom = custom_norm(x)
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-5), "RMSNorm output mismatch"
+    assert torch.allclose(out_hf, out_custom, atol=1e-3), "RMSNorm output mismatch"
 
 
 def test_mlp_correctness():
     """Compares custom MLP (SwiGLU FFN) against Hugging Face's LlamaMLP."""
     hf_config, custom_config = get_test_configs()
     
-    hf_mlp = LlamaMLP(config=hf_config).to(DEVICE)
+    hf_mlp = LlamaMLP(config=hf_config).to(DEVICE, dtype=torch.float16)
     with torch.no_grad():
         hf_mlp.gate_proj.weight.normal_(std=0.02)
         hf_mlp.up_proj.weight.normal_(std=0.02)
@@ -148,7 +148,7 @@ def test_mlp_correctness():
     custom_mlp.w_up = hf_mlp.up_proj.weight.T.clone().detach().to(DEVICE)
     custom_mlp.w_down = hf_mlp.down_proj.weight.T.clone().detach().to(DEVICE)
     
-    x = torch.randn(2, 16, custom_config.hidden_size, device=DEVICE)
+    x = torch.randn(2, 16, custom_config.hidden_size, device=DEVICE, dtype=torch.float16)
     out_hf = hf_mlp(x)
     
     # Custom MLP simulation (based on standard LLama MLP implementation)
@@ -157,7 +157,7 @@ def test_mlp_correctness():
     activated = swiglu(up_proj, gate_proj)
     out_custom = activated @ custom_mlp.w_down
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-5), "MLP forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, atol=1e-3), "MLP forward pass mismatch"
 
 
 def test_attention_prefill_and_decode():
@@ -166,7 +166,7 @@ def test_attention_prefill_and_decode():
     batch = 1
     seq_len = 16
     
-    hf_attn = LlamaAttention(config=hf_config, layer_idx=0).to(DEVICE)
+    hf_attn = LlamaAttention(config=hf_config, layer_idx=0).to(DEVICE, dtype=torch.float16)
     with torch.no_grad():
         hf_attn.q_proj.weight.normal_(std=0.02)
         hf_attn.k_proj.weight.normal_(std=0.02)
@@ -179,13 +179,14 @@ def test_attention_prefill_and_decode():
     custom_attn.wv = hf_attn.v_proj.weight.T.clone().detach().to(DEVICE)
     custom_attn.wo = hf_attn.o_proj.weight.T.clone().detach().to(DEVICE)
     
-    x = torch.randn(batch, seq_len, custom_config.hidden_size, device=DEVICE)
+    x = torch.randn(batch, seq_len, custom_config.hidden_size, device=DEVICE, dtype=torch.float16)
     position_ids = torch.arange(seq_len, device=DEVICE).unsqueeze(0).expand(batch, -1)
     
-    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE)
+    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE, dtype=torch.float16)
     cos, sin = hf_rotary(x, position_ids)
     
-    out_hf, _, _ = hf_attn(x, position_embeddings=(cos, sin), attention_mask=None, position_ids=position_ids)
+    hf_outputs = hf_attn(x, position_embeddings=(cos, sin), attention_mask=None, position_ids=position_ids)
+    out_hf = hf_outputs[0]
     
     q = x @ custom_attn.wq
     k = x @ custom_attn.wk
@@ -218,7 +219,7 @@ def test_attention_prefill_and_decode():
     out_attn = out_attn.transpose(1, 2).contiguous().view(batch, seq_len, -1)
     out_custom = out_attn @ custom_attn.wo
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-5), "Prefill Attention forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, atol=1e-3), "Prefill Attention forward pass mismatch"
 
 
 def test_decoder_layer_correctness():
@@ -227,7 +228,7 @@ def test_decoder_layer_correctness():
     batch = 1
     seq_len = 8
     
-    hf_layer = LlamaDecoderLayer(config=hf_config, layer_idx=0).to(DEVICE)
+    hf_layer = LlamaDecoderLayer(config=hf_config, layer_idx=0).to(DEVICE, dtype=torch.float16)
     with torch.no_grad():
         hf_layer.input_layernorm.weight.normal_(mean=1.0, std=0.1)
         hf_layer.self_attn.q_proj.weight.normal_(std=0.02)
@@ -251,12 +252,13 @@ def test_decoder_layer_correctness():
     custom_layer.mlp.w_up = hf_layer.mlp.up_proj.weight.T.clone().detach().to(DEVICE)
     custom_layer.mlp.w_down = hf_layer.mlp.down_proj.weight.T.clone().detach().to(DEVICE)
     
-    x = torch.randn(batch, seq_len, custom_config.hidden_size, device=DEVICE)
+    x = torch.randn(batch, seq_len, custom_config.hidden_size, device=DEVICE, dtype=torch.float16)
     position_ids = torch.arange(seq_len, device=DEVICE).unsqueeze(0).expand(batch, -1)
     
-    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE)
+    hf_rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE, dtype=torch.float16)
     cos, sin = hf_rotary(x, position_ids)
-    out_hf, _, _ = hf_layer(x, position_embeddings=(cos, sin), position_ids=position_ids)
+    hf_outputs = hf_layer(x, position_embeddings=(cos, sin), position_ids=position_ids)
+    out_hf = hf_outputs[0]
     
     # Custom layer simulation
     norm_x = custom_layer.input_layernorm(x)
@@ -302,7 +304,7 @@ def test_decoder_layer_correctness():
     
     out_custom = attn_residual + mlp_out
     
-    assert torch.allclose(out_hf, out_custom, atol=1e-5), "DecoderLayer forward pass mismatch"
+    assert torch.allclose(out_hf, out_custom, atol=1e-3), "DecoderLayer forward pass mismatch"
 
 
 def test_full_model_equivalence():
