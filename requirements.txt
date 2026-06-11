@@ -7,7 +7,7 @@ triton
 transformers==11.5.0
 
 # benching
-xformers
+# xformers
 
 # CUDA
 # cuda12/13 
