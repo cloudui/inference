@@ -13,10 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from safetensors.torch import load_file
 
-import kernels.rmsnorm as rmsnorm
-import kernels.swiglu as swiglu
-import kernels.flash_decode as flash_decode
-import kernels.fused_rmsnorm_swiglu as fused_rmsnorm_swiglu_kernel
+from kernels import rmsnorm, swiglu, flash_decode, fused_rmsnorm_swiglu
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
