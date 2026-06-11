@@ -269,14 +269,13 @@ def main():
 
     token_ids = torch.zeros(args.batch_size, 1, dtype=torch.long, device=device)
 
-    # Prefill the KV cache up to seq_len with garbage (simulates prior context)
+    # Fill KV cache with random data up to seq_len (simulates prior context).
+    # We write directly because model.forward only supports single-token decode.
     print(f"Pre-filling KV cache to seq_len={args.seq_len} ...")
     if args.seq_len > 0:
-        fake_prefill_ids = torch.zeros(
-            args.batch_size, args.seq_len, dtype=torch.long, device=device
-        )
-        with torch.inference_mode():
-            _ = model.forward(fake_prefill_ids, start_pos=0, kv_caches=kv_caches)
+        for K, V in kv_caches:
+            K[:, :, :args.seq_len] = torch.randn_like(K[:, :, :args.seq_len]) * 0.02
+            V[:, :, :args.seq_len] = torch.randn_like(V[:, :, :args.seq_len]) * 0.02
 
     torch.cuda.synchronize()
     print("Done.\n")
@@ -343,16 +342,31 @@ def main():
     # ── 6. Dispatch gap analysis ──────────────────────────────────────────────
     print("\n─── CPU vs CUDA dispatch gap ────────────────────────────────────────")
     avgs = prof.key_averages()
-    total_cpu_ms  = sum(e.cpu_time_total  for e in avgs) / 1e3
-    total_cuda_ms = sum(e.cuda_time_total for e in avgs) / 1e3
-    gap_ms        = total_cpu_ms - total_cuda_ms
-    print(f"  Total CPU  time: {total_cpu_ms:.2f} ms")
-    print(f"  Total CUDA time: {total_cuda_ms:.2f} ms")
-    print(f"  Dispatch gap:    {gap_ms:.2f} ms")
-    if gap_ms > 0.5 * total_cuda_ms:
-        print("  ⚠️  CPU dispatch is >50% of CUDA time — CUDA Graphs will help a lot here.")
+
+    # FunctionEventAvg attribute names vary across PyTorch versions.
+    # Try several known names for total CPU/CUDA time.
+    def _sum_attr(events, *attr_names):
+        for attr in attr_names:
+            if hasattr(events[0], attr):
+                return sum(getattr(e, attr) for e in events) / 1e3  # μs → ms
+        return None
+
+    total_cpu_ms  = _sum_attr(avgs, "cpu_time_total", "self_cpu_time_total")
+    total_cuda_ms = _sum_attr(avgs, "cuda_time_total", "self_cuda_time_total")
+
+    if total_cpu_ms is not None and total_cuda_ms is not None:
+        gap_ms = total_cpu_ms - total_cuda_ms
+        print(f"  Total CPU  time: {total_cpu_ms:.2f} ms")
+        print(f"  Total CUDA time: {total_cuda_ms:.2f} ms")
+        print(f"  Dispatch gap:    {gap_ms:.2f} ms")
+        if gap_ms > 0.5 * total_cuda_ms:
+            print("  ⚠️  CPU dispatch is >50% of CUDA time — CUDA Graphs will help a lot here.")
+        else:
+            print("  ✓  Dispatch overhead is modest — focus on kernel efficiency first.")
     else:
-        print("  ✓  Dispatch overhead is modest — focus on kernel efficiency first.")
+        gap_ms = 0.0
+        total_cuda_ms = 0.0
+        print("  (Could not extract CPU/CUDA timing attributes from profiler events)")
 
     # ── 7. Memory allocation report ───────────────────────────────────────────
     print("\n─── Top temporaries by self-memory ─────────────────────────────────")
