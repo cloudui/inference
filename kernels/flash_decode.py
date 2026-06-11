@@ -4,6 +4,15 @@ import triton.language as tl
 import math
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_SEQ_KV": 32}, num_warps=4),
+        triton.Config({"BLOCK_SEQ_KV": 64}, num_warps=4),
+        triton.Config({"BLOCK_SEQ_KV": 128}, num_warps=4),
+        triton.Config({"BLOCK_SEQ_KV": 256}, num_warps=4),
+    ],
+    key=["seq_len", "head_dim"],
+)
 @triton.jit
 def flash_decode_generation_kernel(
     q_ptr,
@@ -222,18 +231,21 @@ def flash_decode(
     q_heads = q.shape[1]
     k_heads, seq_len, head_dim = k.shape[1], k.shape[2], k.shape[3]
     
-    BLOCK_SEQ_KV = 64
-    n_blocks = triton.cdiv(seq_len, BLOCK_SEQ_KV)
+    # Find the minimum BLOCK_SEQ_KV across autotuning configurations (which is 32)
+    # to compute the maximum possible block count for conservative buffer allocation.
+    min_block_seq_kv = 32
+    n_blocks_max = triton.cdiv(seq_len, min_block_seq_kv)
     gqa_ratio = q_heads // k_heads
     
-    # Allocate intermediate output and LSE buffers
+    # Allocate intermediate output and LSE buffers based on n_blocks_max
+    # to guarantee they are large enough for any autotuning configuration tested.
     mid_o = torch.zeros(
-        (batch_size, k_heads, n_blocks, gqa_ratio, head_dim), 
+        (batch_size, k_heads, n_blocks_max, gqa_ratio, head_dim), 
         device=q.device, 
         dtype=torch.float16
     )
     mid_lse = torch.zeros(
-        (batch_size, k_heads, n_blocks, gqa_ratio), 
+        (batch_size, k_heads, n_blocks_max, gqa_ratio), 
         device=q.device, 
         dtype=torch.float32
     )
@@ -247,8 +259,9 @@ def flash_decode(
     stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
     stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
     
-    # Launch Generation Kernel
-    grid_gen = (batch_size, k_heads, n_blocks)
+    # The generation grid is a lambda that dynamically reads the current BLOCK_SEQ_KV
+    # being benchmarked by the autotuner.
+    grid_gen = lambda meta: (batch_size, k_heads, triton.cdiv(seq_len, meta["BLOCK_SEQ_KV"]))
     
     flash_decode_generation_kernel[grid_gen](
         q,
@@ -272,10 +285,19 @@ def flash_decode(
         stride_mid_lse_head,
         stride_mid_lse_block,
         stride_mid_lse_gqa,
-        BLOCK_SEQ_KV,
-        head_dim,
-        gqa_ratio,
+        BLOCK_HEAD_DIM=head_dim,
+        gqa_ratio=gqa_ratio,
     )
+    
+    # Retrieve the best selected configuration and compute actual block count for reduction
+    best_config = flash_decode_generation_kernel.best_config
+    if best_config is not None:
+        best_block_seq_kv = best_config.kwargs["BLOCK_SEQ_KV"]
+    else:
+        # Fallback when compilation/tuning hasn't finished or is in a non-autotuned path
+        best_block_seq_kv = 64
+        
+    n_blocks_actual = triton.cdiv(seq_len, best_block_seq_kv)
     
     # Launch Reduction Kernel
     out = torch.zeros((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
@@ -287,7 +309,7 @@ def flash_decode(
         mid_lse,
         out,
         gqa_ratio,
-        n_blocks,
+        n_blocks_actual,
         stride_mid_o_batch,
         stride_mid_o_head,
         stride_mid_o_gqa,
