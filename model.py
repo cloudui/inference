@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 from safetensors.torch import load_file
+from torch.profiler import record_function
 
 from kernels import rmsnorm, swiglu, flash_decode, fused_rmsnorm_swiglu
 
@@ -138,19 +139,25 @@ class Attention:
 
         hidden_shape = (x.shape[0], x.shape[1], -1, self.head_dim,)
 
-        # (b, seqlen, heads, head_dim)
-        q = (x @ self.wq).view(hidden_shape).transpose(1, 2)
-        k = (x @ self.wk).view(hidden_shape).transpose(1, 2)
+        with record_function("qkv_proj"):
+            # (b, seqlen, heads, head_dim)
+            q = (x @ self.wq).view(hidden_shape).transpose(1, 2)
+            k = (x @ self.wk).view(hidden_shape).transpose(1, 2)
+            v = (x @ self.wv).view(hidden_shape).transpose(1, 2)
 
-        q, k = apply_rope(q, k, cos, sin)
-        v = (x @ self.wv).view(hidden_shape).transpose(1, 2)
+        with record_function("rope"):
+            q, k = apply_rope(q, k, cos, sin)
 
-        K, V = kv_cache
-        K[:, :, cache_position:cache_position+1] = k
-        V[:, :, cache_position:cache_position+1] = v
+        with record_function("kv_cache_write"):
+            K, V = kv_cache
+            K[:, :, cache_position:cache_position+1] = k
+            V[:, :, cache_position:cache_position+1] = v
 
-        fd_out = flash_decode(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1])
-        out = fd_out.transpose(1, 2).reshape(x.shape) @ self.wo
+        with record_function("flash_decode"):
+            fd_out = flash_decode(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1])
+            
+        with record_function("out_proj"):
+            out = fd_out.transpose(1, 2).reshape(x.shape) @ self.wo
         
         return out
 
@@ -178,8 +185,13 @@ class MLP:
             (batch, seq_len, hidden_size)
         """
         # kernel dispatch
-        x = swiglu(x @ self.w_up, x @ self.w_gate)
-        return x @ self.w_down
+        with record_function("gate_up_proj"):
+            up = x @ self.w_up
+            gate = x @ self.w_gate
+        with record_function("swiglu"):
+            act = swiglu(up, gate)
+        with record_function("down_proj"):
+            return act @ self.w_down
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -208,14 +220,20 @@ class DecoderLayer:
             (batch, seq_len, hidden_size)
         """
         residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
-        hidden_states = self.self_attn(hidden_states, rope_embeds, kv_cache, cache_position)
-        hidden_states = residual + hidden_states
+        with record_function("input_norm"):
+            normed = self.input_layernorm(hidden_states)
+        with record_function("attn"):
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position)
+        with record_function("attn_residual"):
+            hidden_states = residual + attn_out
 
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        with record_function("post_norm"):
+            normed2 = self.post_attention_layernorm(hidden_states)
+        with record_function("mlp"):
+            mlp_out = self.mlp(normed2)
+        with record_function("mlp_residual"):
+            hidden_states = residual + mlp_out
 
         return hidden_states
 
@@ -297,21 +315,25 @@ class Llama:
         Returns:
             Logits tensor of shape (batch, seq_len, vocab_size)
         """
-        hidden_states = self.embed_tokens[token_ids]
+        with record_function("embed_lookup"):
+            hidden_states = self.embed_tokens[token_ids]
 
         cos = self.cos[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
         sin = self.sin[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
 
         for i, layer in enumerate(self.layers):
-            hidden_states = layer(
-                hidden_states, 
-                rope_embeds=(cos, sin),
-                kv_cache=kv_caches[i],
-                cache_position=start_pos
-            )
+            with record_function(f"layer_{i}"):
+                hidden_states = layer(
+                    hidden_states, 
+                    rope_embeds=(cos, sin),
+                    kv_cache=kv_caches[i],
+                    cache_position=start_pos
+                )
         
-        x = self.norm(hidden_states)
-        out = x @ self.lm_head
+        with record_function("final_norm"):
+            x = self.norm(hidden_states)
+        with record_function("lm_head"):
+            out = x @ self.lm_head
 
         return out
 

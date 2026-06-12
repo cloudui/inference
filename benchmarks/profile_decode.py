@@ -100,79 +100,9 @@ def build_model(args) -> tuple[Llama, list]:
 def profiled_forward(model: Llama, token_ids: torch.Tensor, start_pos: int,
                      kv_caches: list, cfg: LlamaConfig):
     """
-    Identical to model.forward() but wrapped with record_function annotations
-    so the profiler trace is human-readable per-component.
-    
-    These labels show up in chrome://tracing and in the table summary.
+    Delegates directly to model.forward() which has built-in record_function annotations.
     """
-    with record_function("embed_lookup"):
-        hidden_states = model.embed_tokens[token_ids]
-
-    cos = model.cos[start_pos : start_pos + 1].unsqueeze(0).unsqueeze(0)
-    sin = model.sin[start_pos : start_pos + 1].unsqueeze(0).unsqueeze(0)
-
-    for i, layer in enumerate(model.layers):
-        with record_function(f"layer_{i}"):
-            with record_function(f"layer_{i}/input_norm"):
-                normed = layer.input_layernorm(hidden_states)
-
-            with record_function(f"layer_{i}/attn"):
-                with record_function(f"layer_{i}/attn/qkv_proj"):
-                    # These matmuls are the dominant cost in large batch / long-seq prefill
-                    # For decode (bs=1, seqlen=1) they are tiny — watch the dispatch cost here
-                    q = (normed @ layer.self_attn.wq).view(
-                        token_ids.shape[0], 1, -1, cfg.head_dim).transpose(1, 2)
-                    k = (normed @ layer.self_attn.wk).view(
-                        token_ids.shape[0], 1, -1, cfg.head_dim).transpose(1, 2)
-                    v = (normed @ layer.self_attn.wv).view(
-                        token_ids.shape[0], 1, -1, cfg.head_dim).transpose(1, 2)
-
-                with record_function(f"layer_{i}/attn/rope"):
-                    from model import apply_rope
-                    q, k = apply_rope(q, k, cos, sin)
-
-                with record_function(f"layer_{i}/attn/kv_cache_write"):
-                    K, V = kv_caches[i]
-                    K[:, :, start_pos:start_pos+1] = k
-                    V[:, :, start_pos:start_pos+1] = v
-
-                with record_function(f"layer_{i}/attn/flash_decode"):
-                    from kernels import flash_decode
-                    fd_out = flash_decode(
-                        q, K[:, :, :start_pos+1], V[:, :, :start_pos+1]
-                    )
-
-                with record_function(f"layer_{i}/attn/out_proj"):
-                    attn_out = fd_out.transpose(1, 2).reshape(hidden_states.shape) @ layer.self_attn.wo
-
-            with record_function(f"layer_{i}/attn_residual"):
-                hidden_states = hidden_states + attn_out
-
-            with record_function(f"layer_{i}/post_norm"):
-                normed2 = layer.post_attention_layernorm(hidden_states)
-
-            with record_function(f"layer_{i}/mlp"):
-                with record_function(f"layer_{i}/mlp/gate_up_proj"):
-                    up   = normed2 @ layer.mlp.w_up
-                    gate = normed2 @ layer.mlp.w_gate
-
-                with record_function(f"layer_{i}/mlp/swiglu"):
-                    from kernels import swiglu
-                    act = swiglu(up, gate)
-
-                with record_function(f"layer_{i}/mlp/down_proj"):
-                    mlp_out = act @ layer.mlp.w_down
-
-            with record_function(f"layer_{i}/mlp_residual"):
-                hidden_states = hidden_states + mlp_out
-
-    with record_function("final_norm"):
-        x = model.norm(hidden_states)
-
-    with record_function("lm_head"):
-        logits = x @ model.lm_head
-
-    return logits
+    return model.forward(token_ids, start_pos=start_pos, kv_caches=kv_caches)
 
 
 # ── Timing helpers ────────────────────────────────────────────────────────────
