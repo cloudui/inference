@@ -89,10 +89,11 @@ def _make_decoder_layer_pair():
 
     custom_layer = DecoderLayer(config=custom_cfg, layer_idx=0)
 
-    # Copy weights (HF stores (out, in), we store (in, out))
-    custom_layer.self_attn.wq = hf_layer.self_attn.q_proj.weight.T.clone().to(DEVICE)
-    custom_layer.self_attn.wk = hf_layer.self_attn.k_proj.weight.T.clone().to(DEVICE)
-    custom_layer.self_attn.wv = hf_layer.self_attn.v_proj.weight.T.clone().to(DEVICE)
+    # Copy, transpose and concatenate QKV weights (HF stores (out, in), we store (in, out))
+    wq = hf_layer.self_attn.q_proj.weight.T.clone().to(DEVICE)
+    wk = hf_layer.self_attn.k_proj.weight.T.clone().to(DEVICE)
+    wv = hf_layer.self_attn.v_proj.weight.T.clone().to(DEVICE)
+    custom_layer.self_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
     custom_layer.self_attn.wo = hf_layer.self_attn.o_proj.weight.T.clone().to(DEVICE)
     custom_layer.input_layernorm.weight = hf_layer.input_layernorm.weight.clone().to(DEVICE)
     custom_layer.post_attention_layernorm.weight = hf_layer.post_attention_layernorm.weight.clone().to(DEVICE)

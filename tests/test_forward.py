@@ -91,9 +91,10 @@ def _make_model_pair():
         hl = hf_model.model.layers[i]
         cl = custom_model.layers[i]
 
-        cl.self_attn.wq = hl.self_attn.q_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        cl.self_attn.wk = hl.self_attn.k_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        cl.self_attn.wv = hl.self_attn.v_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        wq = hl.self_attn.q_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        wk = hl.self_attn.k_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        wv = hl.self_attn.v_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        cl.self_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
         cl.self_attn.wo = hl.self_attn.o_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
         cl.input_layernorm.weight = hl.input_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)
         cl.post_attention_layernorm.weight = hl.post_attention_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)

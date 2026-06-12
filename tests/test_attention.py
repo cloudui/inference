@@ -59,10 +59,11 @@ def run_attention_test():
     # 3. Instantiate Custom Attention
     custom_attn = Attention(config=custom_config)
     
-    # Copy and transpose weights (HF is out_features x in_features, custom is in_features x out_features)
-    custom_attn.wq = hf_attn.q_proj.weight.T.clone().detach().to(DEVICE)
-    custom_attn.wk = hf_attn.k_proj.weight.T.clone().detach().to(DEVICE)
-    custom_attn.wv = hf_attn.v_proj.weight.T.clone().detach().to(DEVICE)
+    # Copy, transpose and concatenate QKV weights
+    wq = hf_attn.q_proj.weight.T.clone().detach().to(DEVICE)
+    wk = hf_attn.k_proj.weight.T.clone().detach().to(DEVICE)
+    wv = hf_attn.v_proj.weight.T.clone().detach().to(DEVICE)
+    custom_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
     custom_attn.wo = hf_attn.o_proj.weight.T.clone().detach().to(DEVICE)
 
     # 4. Set up Inputs
@@ -124,31 +125,25 @@ def run_attention_test():
     # such as passing `freqs_cis` directly to `apply_rope(x @ self.wq, freqs_cis)` inside Attention.__call__, 
     # where apply_rope expects (q, k, cos, sin). 
     # You will need to align your Attention.__call__ implementation before running this test.
-    try:
-        with torch.inference_mode():
-            custom_out = custom_attn(
-                x=x,
-                rope_embeds=(cos, sin),
-                kv_cache=kv_cache,
-                cache_position=cache_position
-            )
-        print("Custom Attention forward pass completed.")
-        
-        # 7. Assert correctness
-        print("\nComparing outputs...")
-        diff = torch.abs(hf_out - custom_out).max().item()
-        print(f"Max absolute difference: {diff:.6e}")
-        
-        if torch.allclose(hf_out, custom_out, atol=1e-4):
-            print("SUCCESS: Custom Attention matches Hugging Face!")
-        else:
-            print("FAILURE: Mismatch found between Custom and Hugging Face outputs.")
-            
-    except Exception as e:
-        print(f"\nFailed to execute custom_attn due to signature/implementation mismatches:")
-        print(f"Error: {e}")
-        print("\nTip: Look at model.py line 140. You project wq and wk and pass them to apply_rope,")
-        print("but apply_rope expects (q, k, cos, sin) and returns a tuple (q_embed, k_embed).")
+    with torch.inference_mode():
+        custom_out = custom_attn(
+            x=x,
+            rope_embeds=(cos, sin),
+            kv_cache=kv_cache,
+            cache_position=cache_position
+        )
+    print("Custom Attention forward pass completed.")
+    
+    # 7. Assert correctness
+    print("\nComparing outputs...")
+    diff = torch.abs(hf_out - custom_out).max().item()
+    print(f"Max absolute difference: {diff:.6e}")
+    
+    if torch.allclose(hf_out, custom_out, atol=1e-4):
+        print("SUCCESS: Custom Attention matches Hugging Face!")
+    else:
+        print("FAILURE: Mismatch found between Custom and Hugging Face outputs.")
+
 
 if __name__ == "__main__":
     run_attention_test()

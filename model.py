@@ -113,9 +113,11 @@ class Attention:
         self.hidden_size = config.hidden_size
 
         # Projection weights — populated by weight loading
-        self.wq = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
-        self.wk = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
-        self.wv = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
+        # self.wq = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
+        # self.wk = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
+        # self.wv = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
+        qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
+        self.wqkv = torch.empty(config.hidden_size, qkv_concat_dim_size)
         self.wo = torch.empty(self.num_heads * self.head_dim, config.hidden_size)
 
     def __call__(
@@ -141,9 +143,13 @@ class Attention:
 
         with record_function("qkv_proj"):
             # (b, seqlen, heads, head_dim)
-            q = (x @ self.wq).view(hidden_shape).transpose(1, 2)
-            k = (x @ self.wk).view(hidden_shape).transpose(1, 2)
-            v = (x @ self.wv).view(hidden_shape).transpose(1, 2)
+            q_dim = self.num_heads * self.head_dim
+            kv_dim = self.num_kv_heads * self.head_dim
+            q, k, v = torch.split(x @ self.wqkv, [q_dim, kv_dim, kv_dim], dim=-1)
+
+            q = q.view(hidden_shape).transpose(1, 2)
+            k = k.view(hidden_shape).transpose(1, 2)
+            v = v.view(hidden_shape).transpose(1, 2)
 
         with record_function("rope"):
             q, k = apply_rope(q, k, cos, sin)
@@ -392,9 +398,11 @@ class Llama:
             layer = model.layers[i]
 
             # Attention projections: HF (out, in) → custom (in, out)
-            layer.self_attn.wq = state_dict[p + "self_attn.q_proj.weight"].T
-            layer.self_attn.wk = state_dict[p + "self_attn.k_proj.weight"].T
-            layer.self_attn.wv = state_dict[p + "self_attn.v_proj.weight"].T
+            wq = state_dict[p + "self_attn.q_proj.weight"].T
+            wk = state_dict[p + "self_attn.k_proj.weight"].T
+            wv = state_dict[p + "self_attn.v_proj.weight"].T
+            layer.self_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
+
             layer.self_attn.wo = state_dict[p + "self_attn.o_proj.weight"].T
 
             # Norms (1-D, no transpose)
@@ -418,9 +426,7 @@ class Llama:
         self.sin = self.sin.to(device)
 
         for layer in self.layers:
-            layer.self_attn.wq = layer.self_attn.wq.to(device)
-            layer.self_attn.wk = layer.self_attn.wk.to(device)
-            layer.self_attn.wv = layer.self_attn.wv.to(device)
+            layer.self_attn.wqkv = layer.self_attn.wqkv.to(device)
             layer.self_attn.wo = layer.self_attn.wo.to(device)
             layer.input_layernorm.weight = layer.input_layernorm.weight.to(device)
             layer.post_attention_layernorm.weight = layer.post_attention_layernorm.weight.to(device)
