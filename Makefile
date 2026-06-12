@@ -48,5 +48,8 @@ benchmark:
 benchmark-small:
 	python benchmarks/profile_decode.py --small
 
+benchmark-small-chrome:
+	python benchmarks/profile_decode.py --small --export-chrome
+
 benchmark-chrome:
 	python benchmarks/profile_decode.py --export-chrome

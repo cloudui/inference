@@ -20,7 +20,7 @@ import argparse
 import math
 import time
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity, tensorboard_trace_handler
+from torch.profiler import profile, record_function, ProfilerActivity
 
 # ── local imports ──────────────────────────────────────────────────────────────
 from model import Llama, LlamaConfig
@@ -32,9 +32,11 @@ def parse_args():
     p.add_argument("--seq-len",      type=int, default=512,
                    help="Number of KV tokens already in the cache (simulates mid-sequence decode)")
     p.add_argument("--steps",        type=int, default=3,
-                   help="Decode steps to profile (first is warmup, rest are measured)")
+                    help="Decode steps to profile (first is warmup, rest are measured)")
     p.add_argument("--export-chrome", action="store_true",
                    help="Write a Chrome trace to ./profile_trace/ for chrome://tracing")
+    p.add_argument("--trace-name", type=str, default=None,
+                   help="Custom filename or path for the exported Chrome trace")
     p.add_argument("--batch-size",   type=int, default=1)
     p.add_argument("--small",        action="store_true",
                    help="Use a tiny 2-layer config for fast iteration without real weights")
@@ -238,12 +240,6 @@ def main():
     # ── 4. torch.profiler trace ───────────────────────────────────────────────
     print("─── Running torch.profiler (1 warmup + 2 active steps) ─────────────")
 
-    trace_handler = (
-        tensorboard_trace_handler("./profile_trace")
-        if args.export_chrome
-        else None
-    )
-
     schedule = torch.profiler.schedule(wait=0, warmup=1, active=2, repeat=1)
 
     prof_kwargs = dict(
@@ -254,13 +250,30 @@ def main():
         profile_memory=True,
         with_flops=True,
     )
-    if trace_handler:
-        prof_kwargs["on_trace_ready"] = trace_handler
 
     with profile(**prof_kwargs) as prof:
         for step in range(3):  # 0=warmup, 1+2=active
             profiled_forward(model, token_ids, args.seq_len, kv_caches, cfg)
             prof.step()
+
+    if args.export_chrome:
+        import os
+        import datetime
+        os.makedirs("./profile_trace", exist_ok=True)
+        if args.trace_name:
+            trace_path = args.trace_name
+            if not os.path.dirname(trace_path):
+                trace_path = os.path.join("./profile_trace", trace_path)
+            if not (trace_path.endswith(".json") or trace_path.endswith(".gz")):
+                trace_path += ".pt.trace.json"
+        else:
+            run_type = "small" if args.small else "large"
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            trace_path = f"./profile_trace/trace_{run_type}_{timestamp}.pt.trace.json"
+        
+        prof.export_chrome_trace(trace_path)
+        print(f"\nChrome trace written to {trace_path}")
+        print("Open chrome://tracing and load the JSON file there.")
 
     # ── 5. Print summary table ────────────────────────────────────────────────
     print("\n─── Top-20 ops by self-CUDA time ────────────────────────────────────")
@@ -308,9 +321,7 @@ def main():
     # ── 8. Optimization roadmap printed inline ────────────────────────────────
     print_roadmap(timing['median_ms'], bw['roofline_ms'], gap_ms, total_cuda_ms)
 
-    if args.export_chrome:
-        print(f"\nChrome trace written to ./profile_trace/")
-        print("Open chrome://tracing and load the JSON file there.")
+
 
 
 def print_roadmap(median_ms: float, roofline_ms: float, gap_ms: float, cuda_ms: float):
