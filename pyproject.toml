@@ -9,7 +9,8 @@ description = "High-performance inference engine with custom Triton kernels"
 dependencies = [
     "torch",
     "triton",
-    "transformers"
+    "transformers",
+    "pytest",
 ]
 
 [tool.setuptools]
