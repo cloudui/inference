@@ -266,10 +266,8 @@ class Llama:
             config.head_dim, config.max_position_embeddings, config.rope_theta
         )
 
-        cos = torch.cat([freqs_cis.real, freqs_cis.real], dim=-1)  # (max_seq, head_dim)
-        sin = torch.cat([freqs_cis.imag, freqs_cis.imag], dim=-1)
-        self.cos = cos.half()  # or .bfloat16() when you switch
-        self.sin = sin.half()
+        self.cos = freqs_cis.real.contiguous()
+        self.sin = freqs_cis.imag.contiguous()
 
     # ── KV Cache ──────────────────────────────────────────────────────────
 
@@ -318,8 +316,8 @@ class Llama:
         with record_function("embed_lookup"):
             hidden_states = self.embed_tokens[token_ids]
 
-        cos = self.cos[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
-        sin = self.sin[start_pos : start_pos + token_ids.shape[1]].unsqueeze(0).unsqueeze(0)
+        cos = self.cos[start_pos : start_pos + token_ids.shape[1]]
+        sin = self.sin[start_pos : start_pos + token_ids.shape[1]]
 
         for i, layer in enumerate(self.layers):
             with record_function(f"layer_{i}"):
