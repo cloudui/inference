@@ -14,7 +14,7 @@ from pathlib import Path
 from safetensors.torch import load_file
 from torch.profiler import record_function
 
-from kernels import rmsnorm, swiglu, flash_decode, fused_rmsnorm_swiglu
+from kernels import rmsnorm, swiglu, flash_decode, apply_rope_decode
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -152,7 +152,9 @@ class Attention:
             v = v.view(hidden_shape).transpose(1, 2)
 
         with record_function("rope"):
-            q, k = apply_rope(q, k, cos, sin)
+            # q, k = apply_rope_decode(q, k, cos, sin)
+            q = apply_rope_decode(q, cos, sin)
+            k = apply_rope_decode(k, cos, sin)
 
         with record_function("kv_cache_write"):
             K, V = kv_cache
