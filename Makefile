@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small bench-throughput bench-throughput-small bench-throughput-hf bench-throughput-hf-small
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-hf bench-throughput-hf-small
 
 # Default target: show help message
 help:
@@ -22,6 +22,8 @@ help:
 	@echo "  make benchmark-chrome      - Run decode profiler and export Chrome trace"
 	@echo "  make benchmark-hf          - Run HF decode profiler (Llama-3 8B defaults)"
 	@echo "  make benchmark-hf-small    - Run HF decode profiler with a tiny 2-layer config"
+	@echo "  make benchmark-hf-chrome   - Run HF decode profiler and export Chrome trace"
+	@echo "  make benchmark-hf-small-chrome - Run HF decode profiler with tiny config and export trace"
 	@echo "  make bench-throughput      - Run throughput benchmark (Llama-3 8B defaults)"
 	@echo "  make bench-throughput-small - Run throughput benchmark with a tiny 2-layer config"
 	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3 8B defaults)"
@@ -73,6 +75,12 @@ benchmark-hf:
 
 benchmark-hf-small:
 	python benchmarks/profile_decode_hf.py --small
+
+benchmark-hf-chrome:
+	python benchmarks/profile_decode_hf.py --export-chrome
+
+benchmark-hf-small-chrome:
+	python benchmarks/profile_decode_hf.py --small --export-chrome
 
 bench-throughput-hf:
 	python benchmarks/bench_throughput_hf.py
