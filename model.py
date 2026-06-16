@@ -119,6 +119,7 @@ class Attention:
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
         self.hidden_size = config.hidden_size
+        self.max_position_embeddings = config.max_position_embeddings
 
         # Projection weights — populated by weight loading
         # self.wq = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
@@ -155,7 +156,7 @@ class Attention:
 
         with record_function("qkv_proj"):
             if not hasattr(self, "qkv_proj_out") or self.qkv_proj_out.shape[0] != x.shape[0] or self.qkv_proj_out.device != x.device or self.qkv_proj_out.dtype != x.dtype:
-                self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=8192)
+                self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
 
             qkv = torch.matmul(x, self.wqkv, out=self.qkv_proj_out)
             q_dim = self.num_heads * self.head_dim
@@ -241,6 +242,7 @@ class DecoderLayer:
         self.mlp = MLP(config)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.max_position_embeddings = config.max_position_embeddings
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
         self.input_layernorm_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
@@ -264,7 +266,7 @@ class DecoderLayer:
             (batch, seq_len, hidden_size)
         """
         if not hasattr(self, "input_layernorm_out") or self.input_layernorm_out.shape[0] != hidden_states.shape[0] or self.input_layernorm_out.device != hidden_states.device or self.input_layernorm_out.dtype != hidden_states.dtype:
-            self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=8192)
+            self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=self.max_position_embeddings)
 
         residual = hidden_states
         with record_function("input_norm"):
