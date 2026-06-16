@@ -56,9 +56,8 @@ def build_model(args):
     model.sin           = model.sin.to(device)
 
     for layer in model.layers:
-        layer.self_attn.wq = rand_fp16(cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim)
-        layer.self_attn.wk = rand_fp16(cfg.hidden_size, cfg.num_key_value_heads * cfg.head_dim)
-        layer.self_attn.wv = rand_fp16(cfg.hidden_size, cfg.num_key_value_heads * cfg.head_dim)
+        qkv_concat_dim_size = cfg.num_attention_heads * cfg.head_dim + 2 * cfg.num_key_value_heads * cfg.head_dim
+        layer.self_attn.wqkv = rand_fp16(cfg.hidden_size, qkv_concat_dim_size)
         layer.self_attn.wo = rand_fp16(cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size)
         layer.input_layernorm.weight          = rand_fp16(cfg.hidden_size)
         layer.post_attention_layernorm.weight  = rand_fp16(cfg.hidden_size)
