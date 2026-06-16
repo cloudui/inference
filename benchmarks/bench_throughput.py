@@ -61,8 +61,7 @@ def build_model(args):
         layer.self_attn.wo = rand_fp16(cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size)
         layer.input_layernorm.weight          = rand_fp16(cfg.hidden_size)
         layer.post_attention_layernorm.weight  = rand_fp16(cfg.hidden_size)
-        layer.mlp.w_gate = rand_fp16(cfg.hidden_size, cfg.intermediate_size)
-        layer.mlp.w_up   = rand_fp16(cfg.hidden_size, cfg.intermediate_size)
+        layer.mlp.w_gate_up = rand_fp16(cfg.hidden_size, 2 * cfg.intermediate_size)
         layer.mlp.w_down = rand_fp16(cfg.intermediate_size, cfg.hidden_size)
 
     kv_caches = model.allocate_kv_cache(

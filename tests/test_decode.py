@@ -97,8 +97,9 @@ def _make_decoder_layer_pair():
     custom_layer.self_attn.wo = hf_layer.self_attn.o_proj.weight.T.clone().to(DEVICE)
     custom_layer.input_layernorm.weight = hf_layer.input_layernorm.weight.clone().to(DEVICE)
     custom_layer.post_attention_layernorm.weight = hf_layer.post_attention_layernorm.weight.clone().to(DEVICE)
-    custom_layer.mlp.w_gate = hf_layer.mlp.gate_proj.weight.T.clone().to(DEVICE)
-    custom_layer.mlp.w_up = hf_layer.mlp.up_proj.weight.T.clone().to(DEVICE)
+    w_gate = hf_layer.mlp.gate_proj.weight.T.clone().to(DEVICE)
+    w_up = hf_layer.mlp.up_proj.weight.T.clone().to(DEVICE)
+    custom_layer.mlp.w_gate_up = torch.concat((w_gate, w_up), dim=-1)
     custom_layer.mlp.w_down = hf_layer.mlp.down_proj.weight.T.clone().to(DEVICE)
 
     return hf_layer, custom_layer, hf_cfg, custom_cfg

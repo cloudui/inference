@@ -98,8 +98,9 @@ def _make_model_pair():
         cl.self_attn.wo = hl.self_attn.o_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
         cl.input_layernorm.weight = hl.input_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)
         cl.post_attention_layernorm.weight = hl.post_attention_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)
-        cl.mlp.w_gate = hl.mlp.gate_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        cl.mlp.w_up = hl.mlp.up_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        w_gate = hl.mlp.gate_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        w_up = hl.mlp.up_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        cl.mlp.w_gate_up = torch.concat((w_gate, w_up), dim=-1)
         cl.mlp.w_down = hl.mlp.down_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
 
     # Final norm

@@ -193,20 +193,18 @@ class MLP:
     """LLaMA FFN: SwiGLU(x @ gate, x @ up) @ down.
 
     Weight shapes (no bias):
-        w_gate: (hidden_size, intermediate_size)
-        w_up:   (hidden_size, intermediate_size)
-        w_down: (intermediate_size, hidden_size)
+        w_gate_up: (hidden_size, 2 * intermediate_size)
+        w_down:    (intermediate_size, hidden_size)
     """
 
     def __init__(self, config: LlamaConfig):
-        self.w_gate = torch.empty(config.hidden_size, config.intermediate_size)
-        self.w_up = torch.empty(config.hidden_size, config.intermediate_size)
+        self.w_gate_up = torch.empty(config.hidden_size, 2 * config.intermediate_size)
         self.w_down = torch.empty(config.intermediate_size, config.hidden_size)
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        self.up_out = torch.empty(batch_size, 1, self.w_up.shape[1], device=device, dtype=dtype)
-        self.gate_out = torch.empty(batch_size, 1, self.w_gate.shape[1], device=device, dtype=dtype)
-        self.act_out = torch.empty(batch_size, 1, self.w_up.shape[1], device=device, dtype=dtype)
+        intermediate_size = self.w_down.shape[0]
+        self.gate_up_out = torch.empty(batch_size, 1, 2 * intermediate_size, device=device, dtype=dtype)
+        self.act_out = torch.empty(batch_size, 1, intermediate_size, device=device, dtype=dtype)
         self.down_out = torch.empty(batch_size, 1, self.w_down.shape[1], device=device, dtype=dtype)
 
     def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
@@ -216,13 +214,14 @@ class MLP:
         Returns:
             (batch, seq_len, hidden_size)
         """
-        if not hasattr(self, "up_out") or self.up_out.shape[0] != x.shape[0] or self.up_out.device != x.device or self.up_out.dtype != x.dtype:
+        if not hasattr(self, "gate_up_out") or self.gate_up_out.shape[0] != x.shape[0] or self.gate_up_out.device != x.device or self.gate_up_out.dtype != x.dtype:
             self.preallocate_buffers(x.shape[0], x.device, x.dtype)
 
         # kernel dispatch
         with record_function("gate_up_proj"):
-            up = torch.matmul(x, self.w_up, out=self.up_out)
-            gate = torch.matmul(x, self.w_gate, out=self.gate_out)
+            gate_up = torch.matmul(x, self.w_gate_up, out=self.gate_up_out)
+            intermediate_size = self.w_down.shape[0]
+            gate, up = torch.split(gate_up, [intermediate_size, intermediate_size], dim=-1)
         with record_function("swiglu"):
             swiglu_out(up, gate, self.act_out)
             act = self.act_out
@@ -461,8 +460,9 @@ class Llama:
             layer.post_attention_layernorm.weight = state_dict[p + "post_attention_layernorm.weight"]
 
             # MLP projections: HF (out, in) → custom (in, out)
-            layer.mlp.w_gate = state_dict[p + "mlp.gate_proj.weight"].T
-            layer.mlp.w_up = state_dict[p + "mlp.up_proj.weight"].T
+            w_gate = state_dict[p + "mlp.gate_proj.weight"].T
+            w_up = state_dict[p + "mlp.up_proj.weight"].T
+            layer.mlp.w_gate_up = torch.concat((w_gate, w_up), dim=-1)
             layer.mlp.w_down = state_dict[p + "mlp.down_proj.weight"].T
 
         model._move_to_device(device)
@@ -481,6 +481,5 @@ class Llama:
             layer.self_attn.wo = layer.self_attn.wo.to(device)
             layer.input_layernorm.weight = layer.input_layernorm.weight.to(device)
             layer.post_attention_layernorm.weight = layer.post_attention_layernorm.weight.to(device)
-            layer.mlp.w_gate = layer.mlp.w_gate.to(device)
-            layer.mlp.w_up = layer.mlp.w_up.to(device)
+            layer.mlp.w_gate_up = layer.mlp.w_gate_up.to(device)
             layer.mlp.w_down = layer.mlp.w_down.to(device)
