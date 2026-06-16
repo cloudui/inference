@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small bench-throughput bench-throughput-small bench-throughput-hf bench-throughput-hf-small
 
 # Default target: show help message
 help:
@@ -20,6 +20,12 @@ help:
 	@echo "  make benchmark             - Run decode profiler (Llama-3 8B defaults)"
 	@echo "  make benchmark-small       - Run decode profiler with a tiny 2-layer config"
 	@echo "  make benchmark-chrome      - Run decode profiler and export Chrome trace"
+	@echo "  make benchmark-hf          - Run HF decode profiler (Llama-3 8B defaults)"
+	@echo "  make benchmark-hf-small    - Run HF decode profiler with a tiny 2-layer config"
+	@echo "  make bench-throughput      - Run throughput benchmark (Llama-3 8B defaults)"
+	@echo "  make bench-throughput-small - Run throughput benchmark with a tiny 2-layer config"
+	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3 8B defaults)"
+	@echo "  make bench-throughput-hf-small - Run HF throughput benchmark with a tiny 2-layer config"
 	@echo "======================================================================"
 
 # Run all tests
@@ -53,3 +59,23 @@ benchmark-small-chrome:
 
 benchmark-chrome:
 	python benchmarks/profile_decode.py --export-chrome
+
+# Throughput Benchmark Targets (Custom)
+bench-throughput:
+	python benchmarks/bench_throughput.py
+
+bench-throughput-small:
+	python benchmarks/bench_throughput.py --small
+
+# HF Benchmark & Profiling Targets
+benchmark-hf:
+	python benchmarks/profile_decode_hf.py
+
+benchmark-hf-small:
+	python benchmarks/profile_decode_hf.py --small
+
+bench-throughput-hf:
+	python benchmarks/bench_throughput_hf.py
+
+bench-throughput-hf-small:
+	python benchmarks/bench_throughput_hf.py --small
