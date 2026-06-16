@@ -1,32 +1,7 @@
-from tests.test_decode import HEAD_DIM
 import torch
 import triton
 import triton.language as tl
 
-"""
-qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
-
-self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
-self.q_rope_out = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
-self.k_rope_out = torch.empty(batch_size, self.num_kv_heads, 1, self.head_dim, device=device, dtype=dtype)
-
-q, k, v = torch.split(qkv, [q_dim, kv_dim, kv_dim], dim=-1)
-
-q = q.view(hidden_shape).transpose(1, 2)
-k = k.view(hidden_shape).transpose(1, 2)
-v = v.view(hidden_shape).transpose(1, 2)
-
-with record_function("rope"):
-    apply_rope_decode_out(q, cos, sin, self.q_rope_out)
-    apply_rope_decode_out(k, cos, sin, self.k_rope_out)
-    q = self.q_rope_out
-    k = self.k_rope_out
-
-with record_function("kv_cache_write"):
-    K, V = kv_cache
-    K[:, :, cache_position:cache_position+1] = k
-    V[:, :, cache_position:cache_position+1] = v
-"""
 @triton.jit
 def fused_rope_cache_kernel(
     qkv_ptr, # (batch_size, 1, qkv_concat_dim_size)
@@ -79,7 +54,7 @@ def fused_rope_cache_kernel(
         k_start = batch_start + Q_DIM + head_idx_kv * HEAD_DIM
         k_offsets_top = offsets + k_start
         k_offsets_bottom = k_offsets_top + HEAD_DIM // 2
-        v_offsets = tl.arange(0, HEAD_DIM) + batch_start + KV_DIM + head_idx_kv * HEAD_DIM
+        v_offsets = tl.arange(0, HEAD_DIM) + batch_start + Q_DIM + KV_DIM + head_idx_kv * HEAD_DIM
         
         k_top = tl.load(qkv_ptr + k_offsets_top)
         k_bottom = tl.load(qkv_ptr + k_offsets_bottom)
@@ -91,7 +66,7 @@ def fused_rope_cache_kernel(
         k_out_start = batch_idx_q * stride_batch_out_kv + head_idx_kv * stride_head_out_kv + \
                                     cache_pos * HEAD_DIM
         k_out_offsets_top = k_out_start + offsets
-        k_out_offsets_bottom = q_out_offsets_bottom + HEAD_DIM // 2
+        k_out_offsets_bottom = k_out_offsets_top + HEAD_DIM // 2
         tl.store(k_out_ptr + k_out_offsets_top, k_output_top)
         tl.store(k_out_ptr + k_out_offsets_bottom, k_output_bottom)
 
@@ -100,7 +75,7 @@ def fused_rope_cache_kernel(
     # Store computed values using block pointer
     q_out_start = batch_idx_q * stride_batch_out_q + head_idx_q * HEAD_DIM
     q_out_offsets_top = q_out_start + offsets
-    q_out_offsets_bottom = q_out_offsets_bottom + HEAD_DIM // 2
+    q_out_offsets_bottom = q_out_offsets_top + HEAD_DIM // 2
     tl.store(q_out_ptr + q_out_offsets_top, q_output_top)
     tl.store(q_out_ptr + q_out_offsets_bottom, q_output_bottom)
 
@@ -115,12 +90,11 @@ def fused_rope_cache_decode_out(
 ) -> None:
     n_batches, seqlen, qkv_concat_dim = qkv_proj.shape
 
-    _, n_heads, _, head_dim = q_out.shape[1]
+    _, n_heads, _, head_dim = q_out.shape
     kv_heads = k_cache.shape[1]
 
     # seqlen = 1
     grid = (n_batches*n_heads,)
-    stride_batch, stride_head, stride_row, _ = qkv_proj.stride()
 
     fused_rope_cache_kernel[grid](
         qkv_proj, 
@@ -139,10 +113,3 @@ def fused_rope_cache_decode_out(
         head_dim,
     )
 
-
-def apply_rope_decode(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
-    output = torch.empty_like(x)
-    fused_rope_cache_decode_out(x, cos, sin, output)
-    return output
