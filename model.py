@@ -18,7 +18,8 @@ from kernels import (
     rmsnorm, rmsnorm_out,
     swiglu, swiglu_out,
     flash_decode, flash_decode_out,
-    apply_rope_decode, apply_rope_decode_out
+    apply_rope_decode, apply_rope_decode_out,
+    fused_rope_cache_decode_out,
 )
 
 
@@ -132,8 +133,7 @@ class Attention:
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
         qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
         self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
-        self.q_rope_out = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
-        self.k_rope_out = torch.empty(batch_size, self.num_kv_heads, 1, self.head_dim, device=device, dtype=dtype)
+        self.q = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
         min_block_seq_kv = 32
         n_blocks_max = (max_seq_len + min_block_seq_kv - 1) // min_block_seq_kv
         gqa_ratio = self.num_heads // self.num_kv_heads
@@ -159,27 +159,28 @@ class Attention:
                 self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
 
             qkv = torch.matmul(x, self.wqkv, out=self.qkv_proj_out)
-            q_dim = self.num_heads * self.head_dim
-            kv_dim = self.num_kv_heads * self.head_dim
-            q, k, v = torch.split(qkv, [q_dim, kv_dim, kv_dim], dim=-1)
 
-            q = q.view(hidden_shape).transpose(1, 2)
-            k = k.view(hidden_shape).transpose(1, 2)
-            v = v.view(hidden_shape).transpose(1, 2)
-
-        with record_function("rope"):
-            apply_rope_decode_out(q, cos, sin, self.q_rope_out)
-            apply_rope_decode_out(k, cos, sin, self.k_rope_out)
-            q = self.q_rope_out
-            k = self.k_rope_out
-
-        with record_function("kv_cache_write"):
+        with record_function("rope_and_kv_cache_update"):
             K, V = kv_cache
-            K[:, :, cache_position:cache_position+1] = k
-            V[:, :, cache_position:cache_position+1] = v
+            fused_rope_cache_decode_out(
+                qkv, 
+                cos,
+                sin,
+                self.q,
+                K,
+                V,
+                cache_position,
+            )
 
         with record_function("flash_decode"):
-            flash_decode_out(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1], self.mid_o, self.mid_lse, self.fd_out)
+            flash_decode_out(
+                self.q, 
+                K[:, :, : cache_position+1], 
+                V[:, :, : cache_position+1], 
+                self.mid_o, 
+                self.mid_lse, 
+                self.fd_out
+            )
             
         with record_function("out_proj"):
             fd_out_reshaped = self.fd_out.transpose(1, 2).reshape(x.shape)
