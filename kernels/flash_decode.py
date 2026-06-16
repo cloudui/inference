@@ -11,7 +11,7 @@ import math
         triton.Config({"BLOCK_SEQ_KV": 128}, num_warps=4),
         triton.Config({"BLOCK_SEQ_KV": 256}, num_warps=4),
     ],
-    key=["seq_len", "head_dim"],
+    key=["head_dim"],
 )
 @triton.jit
 def flash_decode_generation_kernel(
