@@ -14,7 +14,12 @@ from pathlib import Path
 from safetensors.torch import load_file
 from torch.profiler import record_function
 
-from kernels import rmsnorm, swiglu, flash_decode, apply_rope_decode
+from kernels import (
+    rmsnorm, rmsnorm_out,
+    swiglu, swiglu_out,
+    flash_decode, flash_decode_out,
+    apply_rope_decode, apply_rope_decode_out
+)
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -90,7 +95,10 @@ class RMSNorm:
         self.eps = eps
         self.weight = torch.ones(dim)
 
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+    def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
+        if out is not None:
+            rmsnorm_out(x, self.weight, out, self.eps)
+            return out
         return rmsnorm(x, self.weight, self.eps)
 
 
@@ -120,41 +128,49 @@ class Attention:
         self.wqkv = torch.empty(config.hidden_size, qkv_concat_dim_size)
         self.wo = torch.empty(self.num_heads * self.head_dim, config.hidden_size)
 
+    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
+        qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
+        self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
+        self.q_rope_out = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
+        self.k_rope_out = torch.empty(batch_size, self.num_kv_heads, 1, self.head_dim, device=device, dtype=dtype)
+        min_block_seq_kv = 32
+        n_blocks_max = (max_seq_len + min_block_seq_kv - 1) // min_block_seq_kv
+        gqa_ratio = self.num_heads // self.num_kv_heads
+        self.mid_o = torch.empty(batch_size, self.num_kv_heads, n_blocks_max, gqa_ratio, self.head_dim, device=device, dtype=dtype)
+        self.mid_lse = torch.empty(batch_size, self.num_kv_heads, n_blocks_max, gqa_ratio, device=device, dtype=torch.float32)
+        self.fd_out = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
+        self.wo_out = torch.empty(batch_size, 1, self.hidden_size, device=device, dtype=dtype)
+
     def __call__(
         self,
         x: torch.Tensor,
         rope_embeds: tuple[torch.Tensor, torch.Tensor],
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int = 0,
+        out: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        Args:
-            x: (batch, seq_len, hidden_size)
-            freqs_cis: (seq_len, head_dim // 2) complex
-            kv_cache: optional (k_cache, v_cache) each (batch, n_kv_heads, max_seq_len, head_dim)
-            cache_position: write position in the KV cache (for decode step)
-        
-        Returns:
-            (batch, seq_len, hidden_size)
-        """
         cos, sin = rope_embeds
 
         hidden_shape = (x.shape[0], x.shape[1], -1, self.head_dim,)
 
         with record_function("qkv_proj"):
-            # (b, seqlen, heads, head_dim)
+            if not hasattr(self, "qkv_proj_out") or self.qkv_proj_out.shape[0] != x.shape[0] or self.qkv_proj_out.device != x.device or self.qkv_proj_out.dtype != x.dtype:
+                self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=8192)
+
+            qkv = torch.matmul(x, self.wqkv, out=self.qkv_proj_out)
             q_dim = self.num_heads * self.head_dim
             kv_dim = self.num_kv_heads * self.head_dim
-            q, k, v = torch.split(x @ self.wqkv, [q_dim, kv_dim, kv_dim], dim=-1)
+            q, k, v = torch.split(qkv, [q_dim, kv_dim, kv_dim], dim=-1)
 
             q = q.view(hidden_shape).transpose(1, 2)
             k = k.view(hidden_shape).transpose(1, 2)
             v = v.view(hidden_shape).transpose(1, 2)
 
         with record_function("rope"):
-            # q, k = apply_rope_decode(q, k, cos, sin)
-            q = apply_rope_decode(q, cos, sin)
-            k = apply_rope_decode(k, cos, sin)
+            apply_rope_decode_out(q, cos, sin, self.q_rope_out)
+            apply_rope_decode_out(k, cos, sin, self.k_rope_out)
+            q = self.q_rope_out
+            k = self.k_rope_out
 
         with record_function("kv_cache_write"):
             K, V = kv_cache
@@ -162,10 +178,12 @@ class Attention:
             V[:, :, cache_position:cache_position+1] = v
 
         with record_function("flash_decode"):
-            fd_out = flash_decode(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1])
+            flash_decode_out(q, K[:, :, : cache_position+1], V[:, :, : cache_position+1], self.mid_o, self.mid_lse, self.fd_out)
             
         with record_function("out_proj"):
-            out = fd_out.transpose(1, 2).reshape(x.shape) @ self.wo
+            fd_out_reshaped = self.fd_out.transpose(1, 2).reshape(x.shape)
+            out_tensor = out if out is not None else self.wo_out
+            out = torch.matmul(fd_out_reshaped, self.wo, out=out_tensor)
         
         return out
 
@@ -185,21 +203,32 @@ class MLP:
         self.w_up = torch.empty(config.hidden_size, config.intermediate_size)
         self.w_down = torch.empty(config.intermediate_size, config.hidden_size)
 
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype):
+        self.up_out = torch.empty(batch_size, 1, self.w_up.shape[1], device=device, dtype=dtype)
+        self.gate_out = torch.empty(batch_size, 1, self.w_gate.shape[1], device=device, dtype=dtype)
+        self.act_out = torch.empty(batch_size, 1, self.w_up.shape[1], device=device, dtype=dtype)
+        self.down_out = torch.empty(batch_size, 1, self.w_down.shape[1], device=device, dtype=dtype)
+
+    def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
         """
         Args:
             x: (batch, seq_len, hidden_size)
         Returns:
             (batch, seq_len, hidden_size)
         """
+        if not hasattr(self, "up_out") or self.up_out.shape[0] != x.shape[0] or self.up_out.device != x.device or self.up_out.dtype != x.dtype:
+            self.preallocate_buffers(x.shape[0], x.device, x.dtype)
+
         # kernel dispatch
         with record_function("gate_up_proj"):
-            up = x @ self.w_up
-            gate = x @ self.w_gate
+            up = torch.matmul(x, self.w_up, out=self.up_out)
+            gate = torch.matmul(x, self.w_gate, out=self.gate_out)
         with record_function("swiglu"):
-            act = swiglu(up, gate)
+            swiglu_out(up, gate, self.act_out)
+            act = self.act_out
         with record_function("down_proj"):
-            return act @ self.w_down
+            out_tensor = out if out is not None else self.down_out
+            return torch.matmul(act, self.w_down, out=out_tensor)
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -214,6 +243,14 @@ class DecoderLayer:
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
+        self.input_layernorm_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.post_attention_layernorm_out = torch.empty(batch_size, 1, self.post_attention_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.attn_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.mlp_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.self_attn.preallocate_buffers(batch_size, device, dtype, max_seq_len)
+        self.mlp.preallocate_buffers(batch_size, device, dtype)
+
     def __call__(
         self,
         hidden_states: torch.Tensor,
@@ -227,21 +264,24 @@ class DecoderLayer:
         Returns:
             (batch, seq_len, hidden_size)
         """
+        if not hasattr(self, "input_layernorm_out") or self.input_layernorm_out.shape[0] != hidden_states.shape[0] or self.input_layernorm_out.device != hidden_states.device or self.input_layernorm_out.dtype != hidden_states.dtype:
+            self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=8192)
+
         residual = hidden_states
         with record_function("input_norm"):
-            normed = self.input_layernorm(hidden_states)
+            normed = self.input_layernorm(hidden_states, out=self.input_layernorm_out)
         with record_function("attn"):
-            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position)
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.attn_out)
         with record_function("attn_residual"):
-            hidden_states = residual + attn_out
+            hidden_states = residual.add_(attn_out)
 
         residual = hidden_states
         with record_function("post_norm"):
-            normed2 = self.post_attention_layernorm(hidden_states)
+            normed2 = self.post_attention_layernorm(hidden_states, out=self.post_attention_layernorm_out)
         with record_function("mlp"):
-            mlp_out = self.mlp(normed2)
+            mlp_out = self.mlp(normed2, out=self.mlp_out)
         with record_function("mlp_residual"):
-            hidden_states = residual + mlp_out
+            hidden_states = residual.add_(mlp_out)
 
         return hidden_states
 
@@ -304,6 +344,12 @@ class Llama:
 
     # ── Forward ───────────────────────────────────────────────────────────
 
+    def preallocate_buffers(self, batch_size: int, device: torch.device = torch.device("cuda"), dtype: torch.dtype = torch.float16):
+        self.norm_out = torch.empty(batch_size, 1, self.norm.weight.shape[0], device=device, dtype=dtype)
+        self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[1], device=device, dtype=dtype)
+        for layer in self.layers:
+            layer.preallocate_buffers(batch_size, device, dtype, self.config.max_position_embeddings)
+
     @torch.inference_mode()
     def forward(
         self,
@@ -321,6 +367,9 @@ class Llama:
         Returns:
             Logits tensor of shape (batch, seq_len, vocab_size)
         """
+        if not hasattr(self, "norm_out") or self.norm_out.shape[0] != token_ids.shape[0] or self.norm_out.device != token_ids.device or self.norm_out.dtype != self.embed_tokens.dtype:
+            self.preallocate_buffers(token_ids.shape[0], device=token_ids.device, dtype=self.embed_tokens.dtype)
+
         with record_function("embed_lookup"):
             hidden_states = self.embed_tokens[token_ids]
 
@@ -337,9 +386,9 @@ class Llama:
                 )
         
         with record_function("final_norm"):
-            x = self.norm(hidden_states)
+            x = self.norm(hidden_states, out=self.norm_out)
         with record_function("lm_head"):
-            out = x @ self.lm_head
+            out = torch.matmul(x, self.lm_head, out=self.lm_head_out)
 
         return out
 

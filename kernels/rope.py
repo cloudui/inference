@@ -42,26 +42,23 @@ def rope_decode_kernel(
     tl.store(out_ptr + x_offsets_top, output_top)
     tl.store(out_ptr + x_offsets_bottom, output_bottom.to(tl.float16))
 
-def apply_rope_decode(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
-    output = torch.zeros_like(x)
-
+def apply_rope_decode_out(
+    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, output: torch.Tensor
+) -> None:
     n_batches, n_heads, seqlen, head_dim = x.shape
     grid = (n_batches*n_heads, seqlen)
-
     stride_batch, stride_head, stride_row, _ = x.stride()
 
     rope_decode_kernel[grid](
-        x,
-        cos,
-        sin,
-        output,
-        stride_batch,
-        stride_head,
-        stride_row,
-        n_heads,
-        head_dim, # almost always 64, 128 BLOCK_SIZE
+        x, cos, sin, output,
+        stride_batch, stride_head, stride_row,
+        n_heads, head_dim,
     )
 
+
+def apply_rope_decode(
+    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    output = torch.empty_like(x)
+    apply_rope_decode_out(x, cos, sin, output)
     return output

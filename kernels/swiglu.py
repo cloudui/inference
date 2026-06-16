@@ -78,16 +78,17 @@ def swiglu_native(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     return x * torch.nn.functional.silu(gate)
 
 
-def swiglu(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+def swiglu_out(x: torch.Tensor, gate: torch.Tensor, output: torch.Tensor) -> None:
     x_flatten = x.view(-1)
     gate_flatten = gate.view(-1)
-    output = torch.empty_like(x_flatten)
+    output_flatten = output.view(-1)
+    n_elements = output_flatten.numel()
 
-    n_elements = output.numel()
-
-    # The grid is specified as a function of meta-parameters to adapt to the autotuned BLOCK_SIZE
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+    swiglu_kernel[grid](x_flatten, gate_flatten, output_flatten, n_elements)
 
-    swiglu_kernel[grid](x_flatten, gate_flatten, output, n_elements)
 
-    return output.view(x.shape)
+def swiglu(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+    output = torch.empty_like(x)
+    swiglu_out(x, gate, output)
+    return output

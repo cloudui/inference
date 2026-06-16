@@ -101,17 +101,17 @@ def rmsnorm_kernel(
     # Store computed values using block pointer
     tl.store(out_block_ptr, output.to(tl.float16), boundary_check=(0,))
 
+def rmsnorm_out(
+    x: torch.Tensor, weight: torch.Tensor, output: torch.Tensor, eps: float = 1e-6
+) -> None:
+    N = x.shape[-1]
+    stride_batch, stride_row, _ = x.stride()
+    grid = (x.shape[0], x.shape[1])
+    rmsnorm_kernel[grid](x, weight, output, stride_batch, stride_row, N, eps)
+
 def rmsnorm(
     x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
 ) -> torch.Tensor:
-    N = x.shape[-1]
-    stride_batch, stride_row, _ = x.stride()
     output = torch.empty_like(x)
-
-    # Grid runs over row dimension
-    grid = (x.shape[0], x.shape[1])
-    
-    # Launch kernel; BLOCK_SIZE is omitted as it will be selected by the autotuner
-    rmsnorm_kernel[grid](x, weight, output, stride_batch, stride_row, N, eps)
-
+    rmsnorm_out(x, weight, output, eps)
     return output

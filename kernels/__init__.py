@@ -1,7 +1,7 @@
 # Triton kernels package
 
-from .rmsnorm import rmsnorm
-from .swiglu import swiglu
-from .flash_decode import flash_decode
+from .rmsnorm import rmsnorm, rmsnorm_out
+from .swiglu import swiglu, swiglu_out
+from .flash_decode import flash_decode, flash_decode_out
 from .fused_rmsnorm_swiglu import fused_rmsnorm_swiglu
-from .rope import apply_rope_decode
+from .rope import apply_rope_decode, apply_rope_decode_out
