@@ -41,6 +41,25 @@ Warming up (10 steps)...
   Throughput:       33.8 tok/s
 ────────────────────────────────────────────────────────────
 
+### Fuse rope + kv cache write
+============================================================
+  Decode Throughput Benchmark
+  seq_len=512  decode_steps=128  batch=1
+============================================================
+
+Warming up (30 steps)...
+
+────────────────────────────────────────────────────────────
+  Model:            Llama-3 8B
+  Context length:   512 → 670
+  Decode steps:     128
+  Batch size:       1
+────────────────────────────────────────────────────────────
+  Total time:       3232.07 ms
+  Per step:         25.251 ms/tok
+  Throughput:       39.6 tok/s
+────────────────────────────────────────────────────────────
+
 # HF
 
 ## HF-8B not compiled

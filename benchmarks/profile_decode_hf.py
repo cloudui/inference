@@ -61,7 +61,12 @@ def build_model(args, device, dtype) -> tuple[LlamaForCausalLM, DynamicCache, Ll
         )
 
     print(f"Initializing HF LlamaModel on {device} ({args.dtype})...")
-    model = LlamaForCausalLM(cfg).to(device=device, dtype=dtype)
+    # Instantiate directly on GPU in target precision
+    old_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    with torch.device(device):
+        model = LlamaForCausalLM(cfg)
+    torch.set_default_dtype(old_default_dtype)
     model.eval()
 
     # Pre-fill KV cache using DynamicCache

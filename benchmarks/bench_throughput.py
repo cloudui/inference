@@ -20,7 +20,7 @@ def parse_args():
                    help="KV tokens already in cache (simulates prior context)")
     p.add_argument("--decode-steps", type=int, default=128,
                    help="Number of decode steps to measure")
-    p.add_argument("--warmup",       type=int, default=10,
+    p.add_argument("--warmup",       type=int, default=30,
                    help="Warmup decode steps (not measured)")
     p.add_argument("--batch-size",   type=int, default=1)
     p.add_argument("--small",        action="store_true",

@@ -21,7 +21,7 @@ def parse_args():
                    help="KV tokens already in cache (simulates prior context)")
     p.add_argument("--decode-steps", type=int, default=128,
                    help="Number of decode steps to measure")
-    p.add_argument("--warmup",       type=int, default=10,
+    p.add_argument("--warmup",       type=int, default=30,
                    help="Warmup decode steps (not measured)")
     p.add_argument("--batch-size",   type=int, default=1)
     p.add_argument("--dtype",        type=str, default="float16", choices=["float16", "bfloat16"])
@@ -61,8 +61,12 @@ def build_model(args, device, dtype):
         )
 
     print(f"Initializing HF LlamaModel on {device} ({args.dtype})...")
-    # Instantiate with random weights
-    model = LlamaForCausalLM(cfg).to(device=device, dtype=dtype)
+    # Instantiate directly on GPU in target precision
+    old_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    with torch.device(device):
+        model = LlamaForCausalLM(cfg)
+    torch.set_default_dtype(old_default_dtype)
     model.eval()
 
     # Pre-fill KV cache using DynamicCache
