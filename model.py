@@ -20,6 +20,7 @@ from kernels import (
     flash_decode, flash_decode_out,
     apply_rope_decode, apply_rope_decode_out,
     fused_rope_cache_decode_out,
+    fused_add_rmsnorm_out, fused_add_rmsnorm
 )
 
 
@@ -149,6 +150,20 @@ class RMSNorm:
             return out
         return rmsnorm(x, self.weight, self.eps)
 
+class FusedAddRMSNorm:
+    """Holds the learned scale weight for RMSNorm. Forward dispatches to kernel."""
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        self.eps = eps
+        self.weight = torch.ones(dim)
+
+    def __call__(self, x: torch.Tensor, residual: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
+        if out is not None:
+            fused_add_rmsnorm_out(x, self.weight, residual, out, self.eps)
+            return residual, out
+        
+        out = fused_add_rmsnorm(x, self.weight, hidden_states, self.eps)
+        return residual, out
 
 # ── Attention ─────────────────────────────────────────────────────────────────
 
@@ -282,7 +297,7 @@ class DecoderLayer:
         self.self_attn = Attention(config)
         self.mlp = MLP(config)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.max_position_embeddings = config.max_position_embeddings
         self.buffer_pool = None
 
@@ -319,12 +334,8 @@ class DecoderLayer:
             normed = self.input_layernorm(hidden_states, out=self.buffer_pool.h_ping)
         with record_function("attn"):
             attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong)
-        with record_function("attn_residual"):
-            hidden_states = residual.add_(attn_out)
-
-        residual = hidden_states
-        with record_function("post_norm"):
-            normed2 = self.post_attention_layernorm(hidden_states, out=self.buffer_pool.h_ping)
+        with record_function("attn_residual_post_norm"):
+            residual, normed2 = self.post_attention_layernorm(attn_out, residual, out=self.buffer_pool.h_ping)
         with record_function("mlp"):
             mlp_out = self.mlp(normed2, out=self.buffer_pool.h_pong)
         with record_function("mlp_residual"):
