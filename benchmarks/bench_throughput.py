@@ -50,19 +50,19 @@ def build_model(args):
         return torch.randn(*shape, dtype=torch.float16, device=device) * 0.02
 
     model.embed_tokens = rand_fp16(cfg.vocab_size, cfg.hidden_size)
-    model.lm_head      = rand_fp16(cfg.hidden_size, cfg.vocab_size)
+    model.lm_head      = rand_fp16(cfg.vocab_size, cfg.hidden_size)
     model.norm.weight   = rand_fp16(cfg.hidden_size)
     model.cos           = model.cos.to(device)
     model.sin           = model.sin.to(device)
 
     for layer in model.layers:
         qkv_concat_dim_size = cfg.num_attention_heads * cfg.head_dim + 2 * cfg.num_key_value_heads * cfg.head_dim
-        layer.self_attn.wqkv = rand_fp16(cfg.hidden_size, qkv_concat_dim_size)
-        layer.self_attn.wo = rand_fp16(cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size)
+        layer.self_attn.wqkv = rand_fp16(qkv_concat_dim_size, cfg.hidden_size)
+        layer.self_attn.wo = rand_fp16(cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim)
         layer.input_layernorm.weight          = rand_fp16(cfg.hidden_size)
         layer.post_attention_layernorm.weight  = rand_fp16(cfg.hidden_size)
-        layer.mlp.w_gate_up = rand_fp16(cfg.hidden_size, 2 * cfg.intermediate_size)
-        layer.mlp.w_down = rand_fp16(cfg.intermediate_size, cfg.hidden_size)
+        layer.mlp.w_gate_up = rand_fp16(2 * cfg.intermediate_size, cfg.hidden_size)
+        layer.mlp.w_down = rand_fp16(cfg.hidden_size, cfg.intermediate_size)
 
     kv_caches = model.allocate_kv_cache(
         batch_size=args.batch_size,

@@ -108,11 +108,9 @@ class RMSNorm:
 class Attention:
     """Multi-head attention with GQA support and KV cache for decode.
 
-    Weight shapes (no bias):
-        wq: (hidden_size, num_attention_heads * head_dim)
-        wk: (hidden_size, num_key_value_heads * head_dim)
-        wv: (hidden_size, num_key_value_heads * head_dim)
-        wo: (num_attention_heads * head_dim, hidden_size)
+    Weight shapes (no bias, stored in HF-native (out, in) layout):
+        wqkv: (num_attention_heads * head_dim + 2 * num_key_value_heads * head_dim, hidden_size)
+        wo:   (hidden_size, num_attention_heads * head_dim)
     """
 
     def __init__(self, config: LlamaConfig):
@@ -127,8 +125,8 @@ class Attention:
         # self.wk = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
         # self.wv = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
         qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
-        self.wqkv = torch.empty(config.hidden_size, qkv_concat_dim_size)
-        self.wo = torch.empty(self.num_heads * self.head_dim, config.hidden_size)
+        self.wqkv = torch.empty(qkv_concat_dim_size, config.hidden_size)
+        self.wo = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
         qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
@@ -158,7 +156,7 @@ class Attention:
             if not hasattr(self, "qkv_proj_out") or self.qkv_proj_out.shape[0] != x.shape[0] or self.qkv_proj_out.device != x.device or self.qkv_proj_out.dtype != x.dtype:
                 self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
 
-            qkv = torch.matmul(x, self.wqkv, out=self.qkv_proj_out)
+            qkv = torch.matmul(x, self.wqkv.T, out=self.qkv_proj_out)
 
         with record_function("rope_and_kv_cache_update"):
             K, V = kv_cache
@@ -186,7 +184,7 @@ class Attention:
         with record_function("out_proj"):
             fd_out_reshaped = self.fd_out.transpose(1, 2).reshape(x.shape)
             out_tensor = out if out is not None else self.wo_out
-            out = torch.matmul(fd_out_reshaped, self.wo, out=out_tensor)
+            out = torch.matmul(fd_out_reshaped, self.wo.T, out=out_tensor)
         
         return out
 
@@ -195,20 +193,20 @@ class Attention:
 class MLP:
     """LLaMA FFN: SwiGLU(x @ gate, x @ up) @ down.
 
-    Weight shapes (no bias):
-        w_gate_up: (hidden_size, 2 * intermediate_size)
-        w_down:    (intermediate_size, hidden_size)
+    Weight shapes (no bias, stored in HF-native (out, in) layout):
+        w_gate_up: (2 * intermediate_size, hidden_size)
+        w_down:    (hidden_size, intermediate_size)
     """
 
     def __init__(self, config: LlamaConfig):
-        self.w_gate_up = torch.empty(config.hidden_size, 2 * config.intermediate_size)
-        self.w_down = torch.empty(config.intermediate_size, config.hidden_size)
+        self.w_gate_up = torch.empty(2 * config.intermediate_size, config.hidden_size)
+        self.w_down = torch.empty(config.hidden_size, config.intermediate_size)
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        intermediate_size = self.w_down.shape[0]
+        intermediate_size = self.w_down.shape[1]
         self.gate_up_out = torch.empty(batch_size, 1, 2 * intermediate_size, device=device, dtype=dtype)
         self.act_out = torch.empty(batch_size, 1, intermediate_size, device=device, dtype=dtype)
-        self.down_out = torch.empty(batch_size, 1, self.w_down.shape[1], device=device, dtype=dtype)
+        self.down_out = torch.empty(batch_size, 1, self.w_down.shape[0], device=device, dtype=dtype)
 
     def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
         """
@@ -222,15 +220,15 @@ class MLP:
 
         # kernel dispatch
         with record_function("gate_up_proj"):
-            gate_up = torch.matmul(x, self.w_gate_up, out=self.gate_up_out)
-            intermediate_size = self.w_down.shape[0]
+            gate_up = torch.matmul(x, self.w_gate_up.T, out=self.gate_up_out)
+            intermediate_size = self.w_down.shape[1]
             gate, up = torch.split(gate_up, [intermediate_size, intermediate_size], dim=-1)
         with record_function("swiglu"):
             swiglu_out(up, gate, self.act_out)
             act = self.act_out
         with record_function("down_proj"):
             out_tensor = out if out is not None else self.down_out
-            return torch.matmul(act, self.w_down, out=out_tensor)
+            return torch.matmul(act, self.w_down.T, out=out_tensor)
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -310,7 +308,7 @@ class Llama:
         # Final norm + output projection
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         # lm_head: (hidden_size, vocab_size) — often tied with embed_tokens
-        self.lm_head = torch.empty(config.hidden_size, config.vocab_size)
+        self.lm_head = torch.empty(config.vocab_size, config.hidden_size)
 
         # Precomputed RoPE frequencies
         freqs_cis = precompute_rope_freqs(
@@ -349,7 +347,7 @@ class Llama:
 
     def preallocate_buffers(self, batch_size: int, device: torch.device = torch.device("cuda"), dtype: torch.dtype = torch.float16):
         self.norm_out = torch.empty(batch_size, 1, self.norm.weight.shape[0], device=device, dtype=dtype)
-        self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[1], device=device, dtype=dtype)
+        self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[0], device=device, dtype=dtype)
         for layer in self.layers:
             layer.preallocate_buffers(batch_size, device, dtype, self.config.max_position_embeddings)
 
@@ -391,7 +389,7 @@ class Llama:
         with record_function("final_norm"):
             x = self.norm(hidden_states, out=self.norm_out)
         with record_function("lm_head"):
-            out = torch.matmul(x, self.lm_head, out=self.lm_head_out)
+            out = torch.matmul(x, self.lm_head.T, out=self.lm_head_out)
 
         return out
 
@@ -439,35 +437,35 @@ class Llama:
         model.embed_tokens = state_dict["model.embed_tokens.weight"]
         model.norm.weight = state_dict["model.norm.weight"]
 
-        # lm_head: HF (vocab, hidden) → custom (hidden, vocab)
+        # lm_head: stored in HF-native (vocab, hidden) layout
         if "lm_head.weight" in state_dict:
-            model.lm_head = state_dict["lm_head.weight"].T
+            model.lm_head = state_dict["lm_head.weight"]
         else:
-            # Weight-tied models share embed_tokens
-            model.lm_head = model.embed_tokens.T
+            # Weight-tied models share embed_tokens — already (vocab, hidden)
+            model.lm_head = model.embed_tokens
 
-        # Per-layer weights
+        # Per-layer weights (stored in HF-native (out, in) layout)
         for i in range(config.num_hidden_layers):
             p = f"model.layers.{i}."
             layer = model.layers[i]
 
-            # Attention projections: HF (out, in) → custom (in, out)
-            wq = state_dict[p + "self_attn.q_proj.weight"].T
-            wk = state_dict[p + "self_attn.k_proj.weight"].T
-            wv = state_dict[p + "self_attn.v_proj.weight"].T
-            layer.self_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
+            # Attention projections: keep HF-native (out, in), concat along dim=0
+            wq = state_dict[p + "self_attn.q_proj.weight"]
+            wk = state_dict[p + "self_attn.k_proj.weight"]
+            wv = state_dict[p + "self_attn.v_proj.weight"]
+            layer.self_attn.wqkv = torch.cat((wq, wk, wv), dim=0)
 
-            layer.self_attn.wo = state_dict[p + "self_attn.o_proj.weight"].T
+            layer.self_attn.wo = state_dict[p + "self_attn.o_proj.weight"]
 
             # Norms (1-D, no transpose)
             layer.input_layernorm.weight = state_dict[p + "input_layernorm.weight"]
             layer.post_attention_layernorm.weight = state_dict[p + "post_attention_layernorm.weight"]
 
-            # MLP projections: HF (out, in) → custom (in, out)
-            w_gate = state_dict[p + "mlp.gate_proj.weight"].T
-            w_up = state_dict[p + "mlp.up_proj.weight"].T
-            layer.mlp.w_gate_up = torch.concat((w_gate, w_up), dim=-1)
-            layer.mlp.w_down = state_dict[p + "mlp.down_proj.weight"].T
+            # MLP projections: keep HF-native (out, in), concat along dim=0
+            w_gate = state_dict[p + "mlp.gate_proj.weight"]
+            w_up = state_dict[p + "mlp.up_proj.weight"]
+            layer.mlp.w_gate_up = torch.cat((w_gate, w_up), dim=0)
+            layer.mlp.w_down = state_dict[p + "mlp.down_proj.weight"]
 
         model._move_to_device(device)
         return model

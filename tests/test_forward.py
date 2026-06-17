@@ -91,23 +91,23 @@ def _make_model_pair():
         hl = hf_model.model.layers[i]
         cl = custom_model.layers[i]
 
-        wq = hl.self_attn.q_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        wk = hl.self_attn.k_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        wv = hl.self_attn.v_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        cl.self_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
-        cl.self_attn.wo = hl.self_attn.o_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        wq = hl.self_attn.q_proj.weight.clone().to(DEVICE, dtype=DTYPE)
+        wk = hl.self_attn.k_proj.weight.clone().to(DEVICE, dtype=DTYPE)
+        wv = hl.self_attn.v_proj.weight.clone().to(DEVICE, dtype=DTYPE)
+        cl.self_attn.wqkv = torch.cat((wq, wk, wv), dim=0)
+        cl.self_attn.wo = hl.self_attn.o_proj.weight.clone().to(DEVICE, dtype=DTYPE)
         cl.input_layernorm.weight = hl.input_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)
         cl.post_attention_layernorm.weight = hl.post_attention_layernorm.weight.clone().to(DEVICE, dtype=DTYPE)
-        w_gate = hl.mlp.gate_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        w_up = hl.mlp.up_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
-        cl.mlp.w_gate_up = torch.concat((w_gate, w_up), dim=-1)
-        cl.mlp.w_down = hl.mlp.down_proj.weight.T.clone().to(DEVICE, dtype=DTYPE)
+        w_gate = hl.mlp.gate_proj.weight.clone().to(DEVICE, dtype=DTYPE)
+        w_up = hl.mlp.up_proj.weight.clone().to(DEVICE, dtype=DTYPE)
+        cl.mlp.w_gate_up = torch.cat((w_gate, w_up), dim=0)
+        cl.mlp.w_down = hl.mlp.down_proj.weight.clone().to(DEVICE, dtype=DTYPE)
 
     # Final norm
     custom_model.norm.weight = hf_model.model.norm.weight.clone().to(DEVICE, dtype=DTYPE)
 
-    # lm_head: HF is (vocab, hidden), custom is (hidden, vocab)
-    custom_model.lm_head = hf_model.lm_head.weight.T.clone().to(DEVICE, dtype=DTYPE)
+    # lm_head: HF is (vocab, hidden), stored directly in same layout
+    custom_model.lm_head = hf_model.lm_head.weight.clone().to(DEVICE, dtype=DTYPE)
 
     return hf_model, custom_model, hf_cfg, custom_cfg
 
