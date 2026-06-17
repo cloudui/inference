@@ -82,7 +82,7 @@ def run_gpu_sanity_check():
 
     print("Executing Triton Flash Decode kernel...")
     # Run our Triton flash_decode kernel
-    out_triton = flash_decode(q, k, v)
+    out_triton = flash_decode(q, k, v, seq_len)
 
     # Check match
     max_diff = torch.abs(out_triton.float() - out_naive.float()).max().item()

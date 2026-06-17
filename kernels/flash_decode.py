@@ -235,8 +235,8 @@ def flash_decode_out(
     stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
     stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
     
-    # Reset intermediate lse buffer to float("-inf") for reduction kernel
-    mid_lse.fill_(float("-inf"))
+    # # Reset intermediate lse buffer to float("-inf") for reduction kernel
+    # mid_lse.fill_(float("-inf"))
     
     # The generation grid is a lambda that dynamically reads the current BLOCK_SEQ_KV
     # being benchmarked by the autotuner.
