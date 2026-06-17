@@ -10,7 +10,7 @@ What this measures:
     • Memory bandwidth consumed by each custom Triton kernel
     • Summary table sorted by self-CUDA time so the worst offender is always #1
 
-What it does NOT do (yet — see roadmap at bottom):
+What it does NOT do (yet):
     • torch.compile / inductor traces
     • CUDA Graphs (we record the profiler BEFORE adding graphs)
     • Multi-step autoregressive loops (add --steps > 1 to stress-test overlap)
@@ -140,7 +140,7 @@ def estimate_decode_bandwidth(cfg: LlamaConfig, batch: int, seq_len: int) -> dic
 
     At bs=1, seq=1, decode is bandwidth-bound (matmuls are thin).
     This tells you roughly how much HBM traffic we produce per step
-    and what the theoretical roofline looks like on L40S (864 GB/s peak).
+    and what the theoretical roofline looks like on RTX Pro 4500 (896 GB/s peak).
 
     Numbers are bytes, not flops.
     """
@@ -171,8 +171,8 @@ def estimate_decode_bandwidth(cfg: LlamaConfig, batch: int, seq_len: int) -> dic
 
     total_bytes = total_weights + total_kv_read + embed_and_head
 
-    l40s_bw_gbs = 864.0  # peak HBM bandwidth (GB/s) — L40S spec
-    theoretical_ms = (total_bytes / 1e9) / l40s_bw_gbs * 1e3
+    rtx_pro_4500_bw_gbs = 896.0  # peak HBM bandwidth (GB/s) — RTX Pro 4500 spec
+    theoretical_ms = (total_bytes / 1e9) / rtx_pro_4500_bw_gbs * 1e3
 
     return {
         "weights_GB":          total_weights / 1e9,
@@ -224,14 +224,14 @@ def main():
 
     # ── 3. Roofline estimate ──────────────────────────────────────────────────
     bw = estimate_decode_bandwidth(cfg, args.batch_size, args.seq_len)
-    print("─── HBM bandwidth estimate (L40S roofline) ─────────────────────────")
+    print("─── HBM bandwidth estimate (RTX Pro 4500 roofline) ─────────────────")
     print(f"  Weight traffic:    {bw['weights_GB']:.2f} GB")
     print(f"  KV cache traffic:  {bw['kv_cache_read_GB']:.2f} GB  (seq_len={args.seq_len})")
     print(f"  Total HBM:         {bw['total_HBM_traffic_GB']:.2f} GB")
-    print(f"  Roofline bound:    {bw['roofline_ms']:.2f} ms  (at 864 GB/s peak)")
+    print(f"  Roofline bound:    {bw['roofline_ms']:.2f} ms  (at 896 GB/s peak)")
     if timing['median_ms'] > 0:
         achieved_bw = bw['total_HBM_traffic_GB'] / (timing['median_ms'] / 1e3)
-        print(f"  Achieved ~BW:      {achieved_bw:.0f} GB/s  ({achieved_bw/864*100:.0f}% of peak)")
+        print(f"  Achieved ~BW:      {achieved_bw:.0f} GB/s  ({achieved_bw/896*100:.0f}% of peak)")
     print(f"  Note: {bw['note']}")
     print()
 
@@ -316,77 +316,7 @@ def main():
         row_limit=10,
     ))
 
-    # ── 8. Optimization roadmap printed inline ────────────────────────────────
-    print_roadmap(timing['median_ms'], bw['roofline_ms'], gap_ms, total_cuda_ms)
-
-
-
-
-def print_roadmap(median_ms: float, roofline_ms: float, gap_ms: float, cuda_ms: float):
-    efficiency = roofline_ms / median_ms if median_ms > 0 else 0
-    gap_ratio  = gap_ms / cuda_ms if cuda_ms > 0 else 0
-
-    print("""
-╔══════════════════════════════════════════════════════════════════════════╗
-║               OPTIMIZATION ROADMAP  (your naïve baseline)               ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  Phase 0 — Already done (your current stack)                            ║
-║    ✓ Split-KV flash decode (avoids full attention matrix)               ║
-║    ✓ Custom RMSNorm + SwiGLU Triton kernels                             ║
-║    ✓ Fused RMSNorm+SwiGLU kernel exists (check if it's wired in MLP)   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  Phase 1 — Low-hanging fruit (memory layout + easy fuses)               ║
-║                                                                          ║
-║  1a. REMOVE the torch.cuda.synchronize() between gen+reduce kernels     ║
-║      in flash_decode.py:280 — this is a hard CPU stall on the hot path. ║
-║      Just remove it; the kernel launch order guarantees ordering.       ║
-║                                                                          ║
-║  1b. Wire up fused_rmsnorm_swiglu in MLP.__call__                       ║
-║      Currently MLP calls rmsnorm then swiglu separately (2 passes).    ║
-║      The fused kernel halves HBM reads for the FFN pre-activation.     ║
-║                                                                          ║
-║  1c. Fuse QKV projection into a single matmul                           ║
-║      Concat [wq, wk, wv] → single (H, Hq+2*Hkv) weight → 1 GEMM.     ║
-║      Saves 2 kernel launches + reduces dispatch overhead.               ║
-║                                                                          ║
-║  1d. KV cache layout: consider (batch, seq, heads, dim) → contiguous   ║
-║      sliced reads in flash_decode. Current (b, h, s, d) means the      ║
-║      seq slice K[:,:,:pos] is contiguous but head stride adds overhead. ║
-║                                                                          ║
-║  1e. Pre-slice RoPE outside the layer loop (cos/sin are already done,  ║
-║      but the unsqueeze() allocates a new tensor every step).           ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  Phase 2 — Kernel-level wins (Triton tuning)                            ║
-║                                                                          ║
-║  2a. Tune BLOCK_SEQ_KV in flash_decode (currently hardcoded 64).       ║
-║      At seq_len=512 on L40S, larger blocks (128) may be faster.        ║
-║      Use triton.autotune on the generation kernel.                      ║
-║                                                                          ║
-║  2b. RMSNorm accumulate in fp32, store fp16 — check that the kernel    ║
-║      doesn't downcast mid-reduction (yours looks correct already).     ║
-║                                                                          ║
-║  2c. Flash decode reduce kernel: the inner tl.range loop is serial.    ║
-║      For short n_blocks (<= 8) consider unrolling or parallel reduce.  ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  Phase 3 — Dispatch overhead (CUDA Graphs)                              ║
-║                                                                          ║
-║  3a. CUDA Graphs: capture the full decode step into a graph and replay ║
-║      it. Eliminates ALL CPU-side kernel launch overhead. Most           ║
-║      important for bs=1 decode where GPU is starved of work.            ║
-║      Constraint: static shapes and no Python control flow per step.    ║
-║                                                                          ║
-║  3b. torch.compile on individual kernels (not full model) as a         ║
-║      targeted tool to eliminate Python overhead on hot paths (e.g.     ║
-║      the QKV proj + RoPE + residual chain can be compiled together).   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  Phase 4 — The big wins (Hopper / vLLM-class)                          ║
-║                                                                          ║
-║  4a. Paged / chunked KV cache (for variable-length batching)            ║
-║  4b. Continuous batching across requests                                ║
-║  4c. WGMMA / TMA-based attention on Hopper (H100 tensor core paths)    ║
-║  4d. Speculative decoding for latency                                   ║
-╚══════════════════════════════════════════════════════════════════════════╝
-""")
+    pass
 
 
 if __name__ == "__main__":

@@ -146,8 +146,8 @@ def estimate_decode_bandwidth(cfg: LlamaConfig, batch: int, seq_len: int, dtype_
 
     total_bytes = total_weights + total_kv_read + embed_and_head
 
-    l40s_bw_gbs = 864.0  # peak HBM bandwidth (GB/s)
-    theoretical_ms = (total_bytes / 1e9) / l40s_bw_gbs * 1e3
+    rtx_pro_4500_bw_gbs = 896.0  # peak HBM bandwidth (GB/s) — RTX Pro 4500 spec
+    theoretical_ms = (total_bytes / 1e9) / rtx_pro_4500_bw_gbs * 1e3
 
     return {
         "weights_GB":          total_weights / 1e9,
@@ -187,14 +187,14 @@ def main():
 
     # ── 3. Roofline estimate ──────────────────────────────────────────────────
     bw = estimate_decode_bandwidth(cfg, args.batch_size, args.seq_len, dtype_bytes)
-    print("─── HBM bandwidth estimate (L40S roofline) ─────────────────────────")
+    print("─── HBM bandwidth estimate (RTX Pro 4500 roofline) ─────────────────")
     print(f"  Weight traffic:    {bw['weights_GB']:.2f} GB")
     print(f"  KV cache traffic:  {bw['kv_cache_read_GB']:.2f} GB  (seq_len={args.seq_len})")
     print(f"  Total HBM:         {bw['total_HBM_traffic_GB']:.2f} GB")
-    print(f"  Roofline bound:    {bw['roofline_ms']:.2f} ms  (at 864 GB/s peak)")
+    print(f"  Roofline bound:    {bw['roofline_ms']:.2f} ms  (at 896 GB/s peak)")
     if timing['median_ms'] > 0:
         achieved_bw = bw['total_HBM_traffic_GB'] / (timing['median_ms'] / 1e3)
-        print(f"  Achieved ~BW:      {achieved_bw:.0f} GB/s  ({achieved_bw/864*100:.0f}% of peak)")
+        print(f"  Achieved ~BW:      {achieved_bw:.0f} GB/s  ({achieved_bw/896*100:.0f}% of peak)")
     print()
 
     # ── 4. torch.profiler trace ───────────────────────────────────────────────

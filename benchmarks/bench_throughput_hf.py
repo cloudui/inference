@@ -12,7 +12,7 @@ import argparse
 import time
 import torch
 from transformers import LlamaConfig, LlamaForCausalLM
-from transformers.cache_utils import DynamicCache
+from transformers.cache_utils import DynamicCache, StaticCache
 
 
 def parse_args():
@@ -27,6 +27,8 @@ def parse_args():
     p.add_argument("--dtype",        type=str, default="float16", choices=["float16", "bfloat16"])
     p.add_argument("--compiled",     action="store_true",
                    help="Compile the model using torch.compile")
+    p.add_argument("--static-cache", action="store_true",
+                   help="Use StaticCache instead of DynamicCache (fairer comparison with custom impl)")
     p.add_argument("--small",        action="store_true",
                    help="Use tiny 2-layer config for fast iteration")
     return p.parse_args()
@@ -69,16 +71,31 @@ def build_model(args, device, dtype):
     torch.set_default_dtype(old_default_dtype)
     model.eval()
 
-    # Pre-fill KV cache using DynamicCache
-    hf_cache = DynamicCache()
+    # KV cache setup
     head_dim = cfg.hidden_size // cfg.num_attention_heads
-    
-    if args.seq_len > 0:
-        print(f"Pre-filling KV cache to seq_len={args.seq_len}...")
-        for layer_idx in range(cfg.num_hidden_layers):
-            k = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
-            v = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
-            hf_cache.update(k, v, layer_idx)
+
+    if args.static_cache:
+        # StaticCache: pre-allocated, no dynamic cat/copy overhead
+        # Size to actual usage so SDPA only attends over filled positions
+        max_cache_len = args.seq_len + args.warmup + args.decode_steps + 16
+        hf_cache = StaticCache(config=cfg, max_cache_len=max_cache_len, batch_size=args.batch_size)
+        # Pre-fill by running dummy forward steps
+        if args.seq_len > 0:
+            print(f"Pre-filling StaticCache to seq_len={args.seq_len}...")
+            prefill_tokens = torch.zeros(args.batch_size, 1, dtype=torch.long, device=device)
+            with torch.inference_mode():
+                for i in range(args.seq_len):
+                    position_ids = torch.tensor([[i]], device=device)
+                    model(input_ids=prefill_tokens, past_key_values=hf_cache, use_cache=True, position_ids=position_ids)
+    else:
+        # DynamicCache: grows via cat/copy on each step
+        hf_cache = DynamicCache()
+        if args.seq_len > 0:
+            print(f"Pre-filling DynamicCache to seq_len={args.seq_len}...")
+            for layer_idx in range(cfg.num_hidden_layers):
+                k = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
+                v = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
+                hf_cache.update(k, v, layer_idx)
 
     if args.compiled:
         print("Compiling HF model (this may take a few minutes)...")
@@ -95,7 +112,8 @@ def main():
     print(f"\n{'='*60}")
     print(f"  Hugging Face Decode Throughput Benchmark")
     print(f"  seq_len={args.seq_len}  decode_steps={args.decode_steps}  batch={args.batch_size}")
-    print(f"  dtype={args.dtype}  compiled={args.compiled}")
+    cache_type = "static" if args.static_cache else "dynamic"
+    print(f"  dtype={args.dtype}  compiled={args.compiled}  cache={cache_type}")
     print(f"{'='*60}\n")
 
     model, kv_cache, cfg = build_model(args, device, dtype)
