@@ -23,30 +23,13 @@ def rmsnorm_native(
     return torch.nn.functional.rms_norm(x, (x.shape[-1],), weight, eps)
 
 
-def early_config_prune(configs, named_args, **kwargs):
-    N = named_args["N"]
-    # We must ensure BLOCK_SIZE is at least N, otherwise the thread block 
-    # will not cover the entire dimension of the row.
-    pruned = [c for c in configs if c.kwargs["BLOCK_SIZE"] >= N]
-    if not pruned:
-        # Fallback config when N is larger than our pre-defined block sizes
-        fallback_block_size = triton.next_power_of_2(N)
-        num_warps = 16 if fallback_block_size >= 4096 else 8
-        return [triton.Config({"BLOCK_SIZE": fallback_block_size}, num_warps=num_warps)]
-    return pruned
-
-
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_SIZE": 256}, num_warps=4),
-        triton.Config({"BLOCK_SIZE": 512}, num_warps=4),
-        triton.Config({"BLOCK_SIZE": 1024}, num_warps=8),
-        triton.Config({"BLOCK_SIZE": 2048}, num_warps=8),
-        triton.Config({"BLOCK_SIZE": 4096}, num_warps=16),
-        triton.Config({"BLOCK_SIZE": 8192}, num_warps=16),
+        triton.Config({}, num_warps=4),
+        triton.Config({}, num_warps=8),
+        triton.Config({}, num_warps=16),
     ],
     key=["N"],
-    prune_configs_by={"early_config_prune": early_config_prune},
 )
 @triton.jit
 def rmsnorm_kernel(
@@ -107,7 +90,10 @@ def rmsnorm_out(
     N = x.shape[-1]
     stride_batch, stride_row, _ = x.stride()
     grid = (x.shape[0], x.shape[1])
-    rmsnorm_kernel[grid](x, weight, output, stride_batch, stride_row, N, eps)
+    BLOCK_SIZE = triton.next_power_of_2(N)
+    rmsnorm_kernel[grid](
+        x, weight, output, stride_batch, stride_row, N, eps, BLOCK_SIZE=BLOCK_SIZE
+    )
 
 def rmsnorm(
     x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
