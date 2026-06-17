@@ -60,9 +60,60 @@ Warming up (30 steps)...
   Throughput:       39.6 tok/s
 ────────────────────────────────────────────────────────────
 
+### Other optims
+- remove kv cache slicing for FD
+- remove initialization transpose on affine trans
+
+This is actually like a 4% regression, probably due to transpose overhead. May be removed via CUDA graphs but we are yet to see. 
+Maybe revert: 179f662a9d3c3102d658e81790fada083945f8ca 
+
+============================================================
+  Decode Throughput Benchmark
+  seq_len=512  decode_steps=128  batch=1
+============================================================
+
+Warming up (30 steps)...
+
+────────────────────────────────────────────────────────────
+  Model:            Llama-3 8B
+  Context length:   512 → 670
+  Decode steps:     128
+  Batch size:       1
+────────────────────────────────────────────────────────────
+  Total time:       3318.58 ms
+  Per step:         25.926 ms/tok
+  Throughput:       38.6 tok/s
+────────────────────────────────────────────────────────────
+
 # HF
 
+Dynamic cache
+
 ## HF-8B not compiled
+
+============================================================
+  Hugging Face Decode Throughput Benchmark
+  seq_len=512  decode_steps=128  batch=1
+  dtype=float16  compiled=False  cache=dynamic
+============================================================
+
+Initializing HF LlamaModel on cuda (float16)...
+Pre-filling DynamicCache to seq_len=512...
+Warming up (30 steps)...
+Running timed steps...
+
+────────────────────────────────────────────────────────────
+  Model:            HF Llama-3 8B
+  Context length:   512 → 670
+  Decode steps:     128
+  Batch size:       1
+  Dtype:            float16
+  Compiled:         False
+────────────────────────────────────────────────────────────
+  Total time:       2970.31 ms
+  Per step:         23.206 ms/tok
+  Throughput:       43.1 tok/s
+────────────────────────────────────────────────────────────
 
 ## HF-8B compiled
 ────────────────────────────────────────────────────────────
