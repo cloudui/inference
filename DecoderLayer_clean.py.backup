@@ -1,0 +1,59 @@
+import torch
+from torch.profiler import record_function
+from model import LlamaConfig, Attention, MLP, RMSNorm, FusedAddRMSNorm
+
+class DecoderLayer:
+    """Pre-norm transformer block: RMSNorm -> Attention + residual -> RMSNorm -> MLP + residual.
+    
+    This is the clean, standalone version of the decoder layer before cross-layer fusion.
+    """
+
+    def __init__(self, config: LlamaConfig, layer_idx: int):
+        self.layer_idx = layer_idx
+        self.self_attn = Attention(config)
+        self.mlp = MLP(config)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.max_position_embeddings = config.max_position_embeddings
+
+    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
+        self.input_layernorm_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.post_attention_layernorm_out = torch.empty(batch_size, 1, self.post_attention_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.attn_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.mlp_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
+        self.self_attn.preallocate_buffers(batch_size, device, dtype, max_seq_len)
+        self.mlp.preallocate_buffers(batch_size, device, dtype)
+
+    def __call__(
+        self,
+        hidden_states: torch.Tensor,
+        rope_embeds: tuple[torch.Tensor, torch.Tensor],
+        kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
+        cache_position: int = 0,
+    ) -> torch.Tensor:
+        """
+        Args:
+            hidden_states: (batch, seq_len, hidden_size)
+        Returns:
+            (batch, seq_len, hidden_size)
+        """
+        if not hasattr(self, "input_layernorm_out") or self.input_layernorm_out.shape[0] != hidden_states.shape[0] or self.input_layernorm_out.device != hidden_states.device or self.input_layernorm_out.dtype != hidden_states.dtype:
+            self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=self.max_position_embeddings)
+
+        residual = hidden_states
+        with record_function("input_norm"):
+            normed = self.input_layernorm(hidden_states, out=self.input_layernorm_out)
+        with record_function("attn"):
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.attn_out)
+        with record_function("attn_fused_residual_post_norm"):
+            _, normed2 = self.post_attention_layernorm(
+                attn_out,
+                residual, 
+                out=self.post_attention_layernorm_out, 
+            )
+        with record_function("mlp"):
+            mlp_out = self.mlp(normed2, out=self.mlp_out)
+        with record_function("mlp_residual"):
+            hidden_states = residual.add_(mlp_out)
+
+        return hidden_states

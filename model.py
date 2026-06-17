@@ -162,7 +162,7 @@ class FusedAddRMSNorm:
             fused_add_rmsnorm_out(x, self.weight, residual, out, self.eps)
             return residual, out
         
-        out = fused_add_rmsnorm(x, self.weight, hidden_states, self.eps)
+        out = fused_add_rmsnorm(x, self.weight, residual, self.eps)
         return residual, out
 
 # ── Attention ─────────────────────────────────────────────────────────────────
@@ -296,7 +296,10 @@ class DecoderLayer:
         self.layer_idx = layer_idx
         self.self_attn = Attention(config)
         self.mlp = MLP(config)
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        if layer_idx == 0:
+            self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        else:
+            self.input_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.max_position_embeddings = config.max_position_embeddings
         self.buffer_pool = None
@@ -315,33 +318,44 @@ class DecoderLayer:
 
     def __call__(
         self,
-        hidden_states: torch.Tensor,
-        rope_embeds: tuple[torch.Tensor, torch.Tensor],
+        residual: torch.Tensor,
+        mlp_out: torch.Tensor | None = None,
+        rope_embeds: tuple[torch.Tensor, torch.Tensor] = None,
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int = 0,
-    ) -> torch.Tensor:
+        fused: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            hidden_states: (batch, seq_len, hidden_size)
+            residual: (batch, seq_len, hidden_size)
+            mlp_out: (batch, seq_len, hidden_size) or None for the first layer
+            fused: if True, returns (residual, mlp_out) tuple to defer residual add.
+                   if False, performs residual add in-place and returns a single tensor.
         Returns:
-            (batch, seq_len, hidden_size)
+            (residual, mlp_out) if fused else residual
         """
         if self.buffer_pool is None or self.buffer_pool.h_ping is None:
-            self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=self.max_position_embeddings)
+            self.preallocate_buffers(residual.shape[0], residual.device, residual.dtype, max_seq_len=self.max_position_embeddings)
 
-        residual = hidden_states
         with record_function("input_norm"):
-            normed = self.input_layernorm(hidden_states, out=self.buffer_pool.h_ping)
+            if mlp_out is None:
+                normed = self.input_layernorm(residual, out=self.buffer_pool.h_ping)
+            else:
+                residual, normed = self.input_layernorm(mlp_out, residual, out=self.buffer_pool.h_ping)
+
         with record_function("attn"):
             attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong)
         with record_function("attn_residual_post_norm"):
             residual, normed2 = self.post_attention_layernorm(attn_out, residual, out=self.buffer_pool.h_ping)
         with record_function("mlp"):
             mlp_out = self.mlp(normed2, out=self.buffer_pool.h_pong)
-        with record_function("mlp_residual"):
-            hidden_states = residual.add_(mlp_out)
 
-        return hidden_states
+        if fused:
+            return residual, mlp_out
+        else:
+            with record_function("mlp_residual"):
+                hidden_states = residual.add_(mlp_out)
+            return hidden_states
 
 
 
@@ -364,7 +378,7 @@ class Llama:
         self.layers = [DecoderLayer(config, i) for i in range(config.num_hidden_layers)]
 
         # Final norm + output projection
-        self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         # lm_head: (hidden_size, vocab_size) — often tied with embed_tokens
         self.lm_head = torch.empty(config.vocab_size, config.hidden_size)
 
@@ -432,19 +446,22 @@ class Llama:
             self.preallocate_buffers(token_ids.shape[0], device=token_ids.device, dtype=self.embed_tokens.dtype)
 
         with record_function("embed_lookup"):
-            hidden_states = self.embed_tokens[token_ids]
+            residual = self.embed_tokens[token_ids]
 
+        mlp_out = None
         for i, layer in enumerate(self.layers):
             with record_function(f"layer_{i}"):
-                hidden_states = layer(
-                    hidden_states, 
+                residual, mlp_out = layer(
+                    residual, 
+                    mlp_out,
                     rope_embeds=(self.cos, self.sin),
                     kv_cache=kv_caches[i],
-                    cache_position=start_pos
+                    cache_position=start_pos,
+                    fused=True,
                 )
         
         with record_function("final_norm"):
-            x = self.norm(hidden_states, out=self.norm_out)
+            _, x = self.norm(mlp_out, residual, out=self.norm_out)
         with record_function("lm_head"):
             out = torch.matmul(x, self.lm_head.T, out=self.lm_head_out)
 
