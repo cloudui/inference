@@ -175,8 +175,9 @@ class Attention:
         with record_function("flash_decode"):
             flash_decode_out(
                 self.q, 
-                K[:, :, : cache_position+1], 
-                V[:, :, : cache_position+1], 
+                K, 
+                V, 
+                cache_position + 1,
                 self.mid_o, 
                 self.mid_lse, 
                 self.fd_out

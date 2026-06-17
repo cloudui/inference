@@ -215,7 +215,7 @@ def flash_decode_reduce_kernel(
     
 
 def flash_decode_out(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
     mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor
 ) -> None:
     """Computes Grouped-Query Attention (GQA) using a Split-KV flash decoding approach.
@@ -223,7 +223,7 @@ def flash_decode_out(
     """
     batch_size = q.shape[0]
     q_heads = q.shape[1]
-    k_heads, seq_len, head_dim = k.shape[1], k.shape[2], k.shape[3]
+    _, k_heads, _, head_dim = k.shape
     
     gqa_ratio = q_heads // k_heads
     scale = 1 / math.sqrt(head_dim)
@@ -303,11 +303,11 @@ def flash_decode_out(
 
 
 def flash_decode(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
 ) -> torch.Tensor:
     batch_size = q.shape[0]
     q_heads = q.shape[1]
-    k_heads, seq_len, head_dim = k.shape[1], k.shape[2], k.shape[3]
+    _, k_heads, _, head_dim = k.shape
     
     min_block_seq_kv = 32
     n_blocks_max = triton.cdiv(seq_len, min_block_seq_kv)
@@ -325,5 +325,5 @@ def flash_decode(
     )
     out = torch.empty((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
     
-    flash_decode_out(q, k, v, mid_o, mid_lse, out)
+    flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out)
     return out
