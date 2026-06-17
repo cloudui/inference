@@ -39,8 +39,10 @@ def fused_rope_cache_kernel(
     q_top = tl.load(qkv_ptr + q_offsets_top)
     q_bottom = tl.load(qkv_ptr + q_offsets_bottom)
 
-    cos = tl.load(cos_ptr + offsets)
-    sin = tl.load(sin_ptr + offsets)
+    cos_row_ptr = cos_ptr + cache_pos * (HEAD_DIM // 2)
+    sin_row_ptr = sin_ptr + cache_pos * (HEAD_DIM // 2)
+    cos = tl.load(cos_row_ptr + offsets)
+    sin = tl.load(sin_row_ptr + offsets)
 
     # Q 
     q_output_top = (q_top * cos) + (-q_bottom * sin)

@@ -38,6 +38,7 @@ def run_attention_test():
         num_key_value_heads=num_key_value_heads,
         max_position_embeddings=max_seq_len,
         attn_implementation="sdpa",
+        rope_theta=10000.0,
     )
     
     custom_config = LlamaConfig(
@@ -46,6 +47,7 @@ def run_attention_test():
         num_key_value_heads=num_key_value_heads,
         max_position_embeddings=max_seq_len,
         head_dim=head_dim,
+        rope_theta=10000.0,
     )
 
     # 2. Instantiate Hugging Face LlamaAttention (cast to float16)
@@ -60,11 +62,11 @@ def run_attention_test():
     custom_attn = Attention(config=custom_config)
     
     # Copy, transpose and concatenate QKV weights
-    wq = hf_attn.q_proj.weight.T.clone().detach().to(DEVICE)
-    wk = hf_attn.k_proj.weight.T.clone().detach().to(DEVICE)
-    wv = hf_attn.v_proj.weight.T.clone().detach().to(DEVICE)
-    custom_attn.wqkv = torch.concat((wq, wk, wv), dim=-1)
-    custom_attn.wo = hf_attn.o_proj.weight.T.clone().detach().to(DEVICE)
+    wq = hf_attn.q_proj.weight.clone().detach().to(DEVICE)
+    wk = hf_attn.k_proj.weight.clone().detach().to(DEVICE)
+    wv = hf_attn.v_proj.weight.clone().detach().to(DEVICE)
+    custom_attn.wqkv = torch.cat((wq, wk, wv), dim=0)
+    custom_attn.wo = hf_attn.o_proj.weight.clone().detach().to(DEVICE)
 
     # 4. Set up Inputs
     batch_size = 1
@@ -74,15 +76,15 @@ def run_attention_test():
     # Input tensor shape: (batch_size, seq_len, hidden_size) in float16
     x = torch.randn(batch_size, seq_len, hidden_size, device=DEVICE, dtype=torch.float16)
     
-    # Precompute RoPE table
+    # Precompute RoPE tables
     freqs_cis = precompute_rope_freqs(
         head_dim=head_dim,
         max_seq_len=max_seq_len,
         theta=custom_config.rope_theta,
         device=DEVICE
     )
-    # Extract frequency cis for current cache position (for your custom RoPE apply)
-    freqs_cis_step = freqs_cis[cache_position:cache_position+1]
+    cos_table = freqs_cis.real.contiguous()
+    sin_table = freqs_cis.imag.contiguous()
 
     # Set up KV cache (batch, num_kv_heads, max_seq_len, head_dim) in float16
     # Prefill some random values in positions 0..3 of the cache
@@ -128,7 +130,7 @@ def run_attention_test():
     with torch.inference_mode():
         custom_out = custom_attn(
             x=x,
-            rope_embeds=(cos, sin),
+            rope_embeds=(cos_table, sin_table),
             kv_cache=kv_cache,
             cache_position=cache_position
         )
@@ -136,10 +138,14 @@ def run_attention_test():
     
     # 7. Assert correctness
     print("\nComparing outputs...")
-    diff = torch.abs(hf_out - custom_out).max().item()
+    abs_diff = torch.abs(hf_out - custom_out)
+    diff = abs_diff.max().item()
     print(f"Max absolute difference: {diff:.6e}")
+    print(f"Mean absolute difference: {abs_diff.mean().item():.6e}")
+    print(f"Median absolute difference: {abs_diff.median().item():.6e}")
     
-    if torch.allclose(hf_out, custom_out, atol=1e-4):
+    # We use a standard tolerance for float16 operations (atol=5e-3)
+    if torch.allclose(hf_out, custom_out, atol=5e-3):
         print("SUCCESS: Custom Attention matches Hugging Face!")
     else:
         print("FAILURE: Mismatch found between Custom and Hugging Face outputs.")

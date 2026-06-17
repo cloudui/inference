@@ -314,7 +314,6 @@ class Llama:
         freqs_cis = precompute_rope_freqs(
             config.head_dim, config.max_position_embeddings, config.rope_theta
         )
-
         self.cos = freqs_cis.real.contiguous()
         self.sin = freqs_cis.imag.contiguous()
 
@@ -374,14 +373,11 @@ class Llama:
         with record_function("embed_lookup"):
             hidden_states = self.embed_tokens[token_ids]
 
-        cos = self.cos[start_pos : start_pos + token_ids.shape[1]]
-        sin = self.sin[start_pos : start_pos + token_ids.shape[1]]
-
         for i, layer in enumerate(self.layers):
             with record_function(f"layer_{i}"):
                 hidden_states = layer(
                     hidden_states, 
-                    rope_embeds=(cos, sin),
+                    rope_embeds=(self.cos, self.sin),
                     kv_cache=kv_caches[i],
                     cache_position=start_pos
                 )

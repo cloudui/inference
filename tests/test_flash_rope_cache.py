@@ -33,7 +33,7 @@ def test_fused_rope_cache_vs_original(batch_size, cache_position, num_heads, num
     # Input projections (batch, 1, qkv_concat_dim)
     qkv_proj = torch.randn(batch_size, 1, qkv_concat_dim, device=DEVICE, dtype=dtype)
     
-    # Cos/Sin RoPE embeddings (1, head_dim // 2) for this step
+    # Cos/Sin RoPE embeddings (max_seq_len, head_dim // 2) for all positions
     hf_config = HFLlamaConfig(
         num_attention_heads=num_heads,
         num_key_value_heads=num_kv_heads,
@@ -41,13 +41,13 @@ def test_fused_rope_cache_vs_original(batch_size, cache_position, num_heads, num
         rope_theta=10000.0,
     )
     rotary = LlamaRotaryEmbedding(config=hf_config).to(DEVICE, dtype=dtype)
-    dummy_x = torch.zeros(batch_size, 1, num_heads * head_dim, device=DEVICE, dtype=dtype)
-    position_ids = torch.tensor([[cache_position]], device=DEVICE)
-    cos_hf, sin_hf = rotary(dummy_x, position_ids)
+    dummy_x_full = torch.zeros(1, max_seq_len, num_heads * head_dim, device=DEVICE, dtype=dtype)
+    position_ids_full = torch.arange(max_seq_len, device=DEVICE).unsqueeze(0)
+    cos_hf_full, sin_hf_full = rotary(dummy_x_full, position_ids_full)
     
-    # Extract cos, sin of shape (1, head_dim // 2) to match model.py structure robustly
-    cos = cos_hf.flatten()[:head_dim // 2].unsqueeze(0).contiguous()
-    sin = sin_hf.flatten()[:head_dim // 2].unsqueeze(0).contiguous()
+    # Extract cos, sin of shape (max_seq_len, head_dim // 2) to match model.py structure robustly
+    cos = cos_hf_full.view(max_seq_len, head_dim)[:, :head_dim // 2].contiguous()
+    sin = sin_hf_full.view(max_seq_len, head_dim)[:, :head_dim // 2].contiguous()
     
     # Allocate output tensors and caches for "original" approach
     q_out_orig = torch.empty(batch_size, num_heads, 1, head_dim, device=DEVICE, dtype=dtype)
@@ -72,10 +72,12 @@ def test_fused_rope_cache_vs_original(batch_size, cache_position, num_heads, num
     k = k.view(hidden_shape).transpose(1, 2).contiguous()
     v = v.view(hidden_shape).transpose(1, 2).contiguous()
     
-    apply_rope_decode_out(q, cos, sin, q_out_orig)
+    cos_sliced = cos[cache_position : cache_position + 1]
+    sin_sliced = sin[cache_position : cache_position + 1]
+    apply_rope_decode_out(q, cos_sliced, sin_sliced, q_out_orig)
     
     k_rope_out_orig = torch.empty(batch_size, num_kv_heads, 1, head_dim, device=DEVICE, dtype=dtype)
-    apply_rope_decode_out(k, cos, sin, k_rope_out_orig)
+    apply_rope_decode_out(k, cos_sliced, sin_sliced, k_rope_out_orig)
     
     # Cache writes
     k_cache_orig[:, :, cache_position:cache_position+1] = k_rope_out_orig
@@ -177,9 +179,12 @@ def test_fused_rope_cache_vs_hf():
     k_cache_fused = torch.zeros_like(k_cache_ref)
     v_cache_fused = torch.zeros_like(v_cache_ref)
     
-    # The kernel needs cos and sin of shape (1, head_dim // 2)
-    cos_kernel = cos_hf.flatten()[:head_dim // 2].unsqueeze(0).contiguous()
-    sin_kernel = sin_hf.flatten()[:head_dim // 2].unsqueeze(0).contiguous()
+    # Generate full cos/sin tables for the kernel
+    position_ids_full = torch.arange(max_seq_len, device=DEVICE).unsqueeze(0)
+    dummy_x_full = torch.zeros(1, max_seq_len, num_heads * head_dim, device=DEVICE, dtype=dtype)
+    cos_hf_full, sin_hf_full = rotary(dummy_x_full, position_ids_full)
+    cos_kernel = cos_hf_full.view(max_seq_len, head_dim)[:, :head_dim // 2].contiguous()
+    sin_kernel = sin_hf_full.view(max_seq_len, head_dim)[:, :head_dim // 2].contiguous()
     
     fused_rope_cache_decode_out(
         qkv_proj=qkv_proj,
