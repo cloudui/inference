@@ -39,6 +39,53 @@ class LlamaConfig:
     head_dim: int = 128                 # hidden_size // num_attention_heads
 
 
+# ── Buffer Pool ───────────────────────────────────────────────────────────────
+
+class BufferPool:
+    """Shared/reusable buffer pool for Llama decode layers."""
+    def __init__(self):
+        self.h_ping = None
+        self.h_pong = None
+        
+        # Attention buffers
+        self.qkv_proj_out = None
+        self.q = None
+        self.mid_o = None
+        self.mid_lse = None
+        self.fd_out = None
+        
+        # MLP buffers
+        self.gate_up_out = None
+        self.act_out = None
+
+    def preallocate(
+        self,
+        config: LlamaConfig,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ):
+        if self.h_ping is not None:
+            return
+        self.h_ping = torch.empty(batch_size, 1, config.hidden_size, device=device, dtype=dtype)
+        self.h_pong = torch.empty(batch_size, 1, config.hidden_size, device=device, dtype=dtype)
+        
+        qkv_concat_dim_size = config.num_attention_heads * config.head_dim + 2 * config.num_key_value_heads * config.head_dim
+        self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
+        self.q = torch.empty(batch_size, config.num_attention_heads, 1, config.head_dim, device=device, dtype=dtype)
+        
+        min_block_seq_kv = 32
+        n_blocks_max = (config.max_position_embeddings + min_block_seq_kv - 1) // min_block_seq_kv
+        gqa_ratio = config.num_attention_heads // config.num_key_value_heads
+        self.mid_o = torch.empty(batch_size, config.num_key_value_heads, n_blocks_max, gqa_ratio, config.head_dim, device=device, dtype=dtype)
+        self.mid_lse = torch.empty(batch_size, config.num_key_value_heads, n_blocks_max, gqa_ratio, device=device, dtype=torch.float32)
+        self.fd_out = torch.empty(batch_size, config.num_attention_heads, 1, config.head_dim, device=device, dtype=dtype)
+        
+        self.gate_up_out = torch.empty(batch_size, 1, 2 * config.intermediate_size, device=device, dtype=dtype)
+        self.act_out = torch.empty(batch_size, 1, config.intermediate_size, device=device, dtype=dtype)
+
+
+
 # ── RoPE ──────────────────────────────────────────────────────────────────────
 
 def precompute_rope_freqs(
@@ -114,6 +161,8 @@ class Attention:
     """
 
     def __init__(self, config: LlamaConfig):
+        self.config = config
+        self.buffer_pool = None
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
@@ -121,24 +170,14 @@ class Attention:
         self.max_position_embeddings = config.max_position_embeddings
 
         # Projection weights — populated by weight loading
-        # self.wq = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
-        # self.wk = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
-        # self.wv = torch.empty(config.hidden_size, self.num_kv_heads * self.head_dim)
         qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
         self.wqkv = torch.empty(qkv_concat_dim_size, config.hidden_size)
         self.wo = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
-        qkv_concat_dim_size = self.num_heads * self.head_dim + 2 * self.num_kv_heads * self.head_dim
-        self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
-        self.q = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
-        min_block_seq_kv = 32
-        n_blocks_max = (max_seq_len + min_block_seq_kv - 1) // min_block_seq_kv
-        gqa_ratio = self.num_heads // self.num_kv_heads
-        self.mid_o = torch.empty(batch_size, self.num_kv_heads, n_blocks_max, gqa_ratio, self.head_dim, device=device, dtype=dtype)
-        self.mid_lse = torch.empty(batch_size, self.num_kv_heads, n_blocks_max, gqa_ratio, device=device, dtype=torch.float32)
-        self.fd_out = torch.empty(batch_size, self.num_heads, 1, self.head_dim, device=device, dtype=dtype)
-        self.wo_out = torch.empty(batch_size, 1, self.hidden_size, device=device, dtype=dtype)
+        if self.buffer_pool is None:
+            self.buffer_pool = BufferPool()
+        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
 
     def __call__(
         self,
@@ -150,13 +189,11 @@ class Attention:
     ) -> torch.Tensor:
         cos, sin = rope_embeds
 
-        hidden_shape = (x.shape[0], x.shape[1], -1, self.head_dim,)
+        if self.buffer_pool is None or self.buffer_pool.qkv_proj_out is None:
+            self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
 
         with record_function("qkv_proj"):
-            if not hasattr(self, "qkv_proj_out") or self.qkv_proj_out.shape[0] != x.shape[0] or self.qkv_proj_out.device != x.device or self.qkv_proj_out.dtype != x.dtype:
-                self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
-
-            qkv = torch.matmul(x, self.wqkv.T, out=self.qkv_proj_out)
+            qkv = torch.matmul(x, self.wqkv.T, out=self.buffer_pool.qkv_proj_out)
 
         with record_function("rope_and_kv_cache_update"):
             K, V = kv_cache
@@ -164,7 +201,7 @@ class Attention:
                 qkv, 
                 cos,
                 sin,
-                self.q,
+                self.buffer_pool.q,
                 K,
                 V,
                 cache_position,
@@ -172,21 +209,22 @@ class Attention:
 
         with record_function("flash_decode"):
             flash_decode_out(
-                self.q, 
+                self.buffer_pool.q, 
                 K, 
                 V, 
                 cache_position + 1,
-                self.mid_o, 
-                self.mid_lse, 
-                self.fd_out
+                self.buffer_pool.mid_o, 
+                self.buffer_pool.mid_lse, 
+                self.buffer_pool.fd_out
             )
             
         with record_function("out_proj"):
-            fd_out_reshaped = self.fd_out.transpose(1, 2).reshape(x.shape)
-            out_tensor = out if out is not None else self.wo_out
+            fd_out_reshaped = self.buffer_pool.fd_out.transpose(1, 2).reshape(x.shape)
+            out_tensor = out if out is not None else self.buffer_pool.h_pong
             out = torch.matmul(fd_out_reshaped, self.wo.T, out=out_tensor)
         
         return out
+
 
 # ── MLP (SwiGLU) ──────────────────────────────────────────────────────────────
 
@@ -199,14 +237,15 @@ class MLP:
     """
 
     def __init__(self, config: LlamaConfig):
+        self.config = config
+        self.buffer_pool = None
         self.w_gate_up = torch.empty(2 * config.intermediate_size, config.hidden_size)
         self.w_down = torch.empty(config.hidden_size, config.intermediate_size)
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        intermediate_size = self.w_down.shape[1]
-        self.gate_up_out = torch.empty(batch_size, 1, 2 * intermediate_size, device=device, dtype=dtype)
-        self.act_out = torch.empty(batch_size, 1, intermediate_size, device=device, dtype=dtype)
-        self.down_out = torch.empty(batch_size, 1, self.w_down.shape[0], device=device, dtype=dtype)
+        if self.buffer_pool is None:
+            self.buffer_pool = BufferPool()
+        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
 
     def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
         """
@@ -215,20 +254,21 @@ class MLP:
         Returns:
             (batch, seq_len, hidden_size)
         """
-        if not hasattr(self, "gate_up_out") or self.gate_up_out.shape[0] != x.shape[0] or self.gate_up_out.device != x.device or self.gate_up_out.dtype != x.dtype:
+        if self.buffer_pool is None or self.buffer_pool.gate_up_out is None:
             self.preallocate_buffers(x.shape[0], x.device, x.dtype)
 
         # kernel dispatch
         with record_function("gate_up_proj"):
-            gate_up = torch.matmul(x, self.w_gate_up.T, out=self.gate_up_out)
+            gate_up = torch.matmul(x, self.w_gate_up.T, out=self.buffer_pool.gate_up_out)
             intermediate_size = self.w_down.shape[1]
             gate, up = torch.split(gate_up, [intermediate_size, intermediate_size], dim=-1)
         with record_function("swiglu"):
-            swiglu_out(up, gate, self.act_out)
-            act = self.act_out
+            swiglu_out(up, gate, self.buffer_pool.act_out)
+            act = self.buffer_pool.act_out
         with record_function("down_proj"):
-            out_tensor = out if out is not None else self.down_out
+            out_tensor = out if out is not None else self.buffer_pool.h_pong
             return torch.matmul(act, self.w_down.T, out=out_tensor)
+
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -237,20 +277,26 @@ class DecoderLayer:
     """Pre-norm transformer block: RMSNorm -> Attention + residual -> RMSNorm -> MLP + residual."""
 
     def __init__(self, config: LlamaConfig, layer_idx: int):
+        self.config = config
         self.layer_idx = layer_idx
         self.self_attn = Attention(config)
         self.mlp = MLP(config)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.max_position_embeddings = config.max_position_embeddings
+        self.buffer_pool = None
+
+    def set_buffer_pool(self, buffer_pool: BufferPool):
+        self.buffer_pool = buffer_pool
+        self.self_attn.buffer_pool = buffer_pool
+        self.mlp.buffer_pool = buffer_pool
 
     def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
-        self.input_layernorm_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
-        self.post_attention_layernorm_out = torch.empty(batch_size, 1, self.post_attention_layernorm.weight.shape[0], device=device, dtype=dtype)
-        self.attn_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
-        self.mlp_out = torch.empty(batch_size, 1, self.input_layernorm.weight.shape[0], device=device, dtype=dtype)
-        self.self_attn.preallocate_buffers(batch_size, device, dtype, max_seq_len)
-        self.mlp.preallocate_buffers(batch_size, device, dtype)
+        if self.buffer_pool is None:
+            self.buffer_pool = BufferPool()
+            self.self_attn.buffer_pool = self.buffer_pool
+            self.mlp.buffer_pool = self.buffer_pool
+        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
 
     def __call__(
         self,
@@ -265,26 +311,27 @@ class DecoderLayer:
         Returns:
             (batch, seq_len, hidden_size)
         """
-        if not hasattr(self, "input_layernorm_out") or self.input_layernorm_out.shape[0] != hidden_states.shape[0] or self.input_layernorm_out.device != hidden_states.device or self.input_layernorm_out.dtype != hidden_states.dtype:
+        if self.buffer_pool is None or self.buffer_pool.h_ping is None:
             self.preallocate_buffers(hidden_states.shape[0], hidden_states.device, hidden_states.dtype, max_seq_len=self.max_position_embeddings)
 
         residual = hidden_states
         with record_function("input_norm"):
-            normed = self.input_layernorm(hidden_states, out=self.input_layernorm_out)
+            normed = self.input_layernorm(hidden_states, out=self.buffer_pool.h_ping)
         with record_function("attn"):
-            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.attn_out)
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong)
         with record_function("attn_residual"):
             hidden_states = residual.add_(attn_out)
 
         residual = hidden_states
         with record_function("post_norm"):
-            normed2 = self.post_attention_layernorm(hidden_states, out=self.post_attention_layernorm_out)
+            normed2 = self.post_attention_layernorm(hidden_states, out=self.buffer_pool.h_ping)
         with record_function("mlp"):
-            mlp_out = self.mlp(normed2, out=self.mlp_out)
+            mlp_out = self.mlp(normed2, out=self.buffer_pool.h_pong)
         with record_function("mlp_residual"):
             hidden_states = residual.add_(mlp_out)
 
         return hidden_states
+
 
 
 # ── Full Model ────────────────────────────────────────────────────────────────
@@ -317,6 +364,10 @@ class Llama:
         self.cos = freqs_cis.real.contiguous()
         self.sin = freqs_cis.imag.contiguous()
 
+        self.buffer_pool = BufferPool()
+        for layer in self.layers:
+            layer.set_buffer_pool(self.buffer_pool)
+
     # ── KV Cache ──────────────────────────────────────────────────────────
 
     def allocate_kv_cache(
@@ -347,8 +398,7 @@ class Llama:
     def preallocate_buffers(self, batch_size: int, device: torch.device = torch.device("cuda"), dtype: torch.dtype = torch.float16):
         self.norm_out = torch.empty(batch_size, 1, self.norm.weight.shape[0], device=device, dtype=dtype)
         self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[0], device=device, dtype=dtype)
-        for layer in self.layers:
-            layer.preallocate_buffers(batch_size, device, dtype, self.config.max_position_embeddings)
+        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
 
     @torch.inference_mode()
     def forward(
