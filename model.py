@@ -289,7 +289,14 @@ class MLP:
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
 
 class DecoderLayer:
-    """Pre-norm transformer block: RMSNorm -> Attention + residual -> RMSNorm -> MLP + residual."""
+    """Pre-norm transformer block with cross-layer RMSNorm fusion.
+
+    Always returns (residual, mlp_out) — the final residual add is deferred
+    to the next layer's FusedAddRMSNorm (or the model's final norm).
+
+    Layer 0 uses plain RMSNorm (no prior mlp_out to fuse).
+    Layers 1+ use FusedAddRMSNorm to fuse the previous layer's residual add.
+    """
 
     def __init__(self, config: LlamaConfig, layer_idx: int):
         self.config = config
@@ -323,16 +330,13 @@ class DecoderLayer:
         rope_embeds: tuple[torch.Tensor, torch.Tensor] = None,
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int = 0,
-        fused: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             residual: (batch, seq_len, hidden_size)
-            mlp_out: (batch, seq_len, hidden_size) or None for the first layer
-            fused: if True, returns (residual, mlp_out) tuple to defer residual add.
-                   if False, performs residual add in-place and returns a single tensor.
+            mlp_out:  previous layer's MLP output (None for layer 0)
         Returns:
-            (residual, mlp_out) if fused else residual
+            (residual, mlp_out) — deferred for the next layer to fuse
         """
         if self.buffer_pool is None or self.buffer_pool.h_ping is None:
             self.preallocate_buffers(residual.shape[0], residual.device, residual.dtype, max_seq_len=self.max_position_embeddings)
@@ -350,12 +354,7 @@ class DecoderLayer:
         with record_function("mlp"):
             mlp_out = self.mlp(normed2, out=self.buffer_pool.h_pong)
 
-        if fused:
-            return residual, mlp_out
-        else:
-            with record_function("mlp_residual"):
-                hidden_states = residual.add_(mlp_out)
-            return hidden_states
+        return residual, mlp_out
 
 
 
@@ -452,12 +451,11 @@ class Llama:
         for i, layer in enumerate(self.layers):
             with record_function(f"layer_{i}"):
                 residual, mlp_out = layer(
-                    residual, 
+                    residual,
                     mlp_out,
                     rope_embeds=(self.cos, self.sin),
                     kv_cache=kv_caches[i],
                     cache_position=start_pos,
-                    fused=True,
                 )
         
         with record_function("final_norm"):

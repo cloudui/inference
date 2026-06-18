@@ -153,12 +153,13 @@ def test_single_decode_step(cache_position):
         )
         hf_hidden = hf_out[0]
 
-        custom_hidden = custom_layer(
-            hidden_states=x,
+        residual, mlp_out = custom_layer(
+            x,
             rope_embeds=(cos_table, sin_table),
             kv_cache=(k_cache, v_cache),
             cache_position=cache_position,
         )
+        custom_hidden = residual + mlp_out
 
     max_diff = (hf_hidden - custom_hidden).abs().max().item()
     assert torch.allclose(hf_hidden, custom_hidden, atol=2e-3), (
@@ -197,12 +198,13 @@ def test_multi_step_decode():
             )
             hf_hidden = hf_out[0]
 
-            custom_hidden = custom_layer(
-                hidden_states=x,
+            residual, mlp_out = custom_layer(
+                x,
                 rope_embeds=(cos_table, sin_table),
                 kv_cache=(k_cache, v_cache),
                 cache_position=step,
             )
+            custom_hidden = residual + mlp_out
 
         max_diff = (hf_hidden - custom_hidden).abs().max().item()
         assert torch.allclose(hf_hidden, custom_hidden, atol=2e-3), (
