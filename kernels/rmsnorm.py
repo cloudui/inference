@@ -42,8 +42,8 @@ def rmsnorm_kernel(
     eps,
     BLOCK_SIZE: tl.constexpr,
 ):
-    pid_batch = tl.program_id(axis=0)
-    pid_row = tl.program_id(axis=1)
+    pid_row = tl.program_id(axis=0)
+    pid_batch = tl.program_id(axis=1)
 
     # Create block pointers for 1D row slices
     x_block_ptr = tl.make_block_ptr(
@@ -89,7 +89,7 @@ def rmsnorm_out(
 ) -> None:
     N = x.shape[-1]
     stride_batch, stride_row, _ = x.stride()
-    grid = (x.shape[0], x.shape[1])
+    grid = (x.shape[1], x.shape[0])
     BLOCK_SIZE = triton.next_power_of_2(N)
     rmsnorm_kernel[grid](
         x, weight, output, stride_batch, stride_row, N, eps, BLOCK_SIZE=BLOCK_SIZE

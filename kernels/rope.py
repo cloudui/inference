@@ -14,8 +14,8 @@ def rope_decode_kernel(
     N_HEADS, 
     HEAD_DIM: tl.constexpr
 ):
-    pid_bh = tl.program_id(axis=0)
-    pid_row = tl.program_id(axis=1)
+    pid_row = tl.program_id(axis=0)
+    pid_bh = tl.program_id(axis=1)
 
     batch_idx = pid_bh // N_HEADS
     head_idx = pid_bh % N_HEADS
@@ -46,7 +46,7 @@ def apply_rope_decode_out(
     x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, output: torch.Tensor
 ) -> None:
     n_batches, n_heads, seqlen, head_dim = x.shape
-    grid = (n_batches*n_heads, seqlen)
+    grid = (seqlen, n_batches*n_heads)
     stride_batch, stride_head, stride_row, _ = x.stride()
 
     rope_decode_kernel[grid](

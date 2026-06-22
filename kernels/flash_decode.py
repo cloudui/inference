@@ -44,9 +44,9 @@ def flash_decode_generation_kernel(
     BLOCK_GQA: tl.constexpr = 16
 
     # Program axes
-    pid_batch = tl.program_id(axis=0)  # Index of the Batch
+    pid_kv = tl.program_id(axis=0)     # Index of the KV block
     pid_head = tl.program_id(axis=1)   # Index of the KV head
-    pid_kv = tl.program_id(axis=2)     # Index of the KV block
+    pid_batch = tl.program_id(axis=2)  # Index of the Batch
 
     # Base pointers with batch offsets
     q_batch_ptr = q_ptr + pid_batch * stride_q_batch
@@ -155,8 +155,8 @@ def flash_decode_reduce_kernel(
     stride_out_head,      
     BLOCK_HEAD_DIM: tl.constexpr,
 ):
-    pid_batch = tl.program_id(axis=0)
-    pid_q_head = tl.program_id(axis=1)
+    pid_q_head = tl.program_id(axis=0)
+    pid_batch = tl.program_id(axis=1)
 
     # Base pointers with batch offsets
     mid_o_batch_ptr = mid_o_ptr + pid_batch * stride_mid_o_batch
@@ -240,7 +240,7 @@ def flash_decode_out(
     
     # The generation grid is a lambda that dynamically reads the current BLOCK_SEQ_KV
     # being benchmarked by the autotuner.
-    grid_gen = lambda meta: (batch_size, k_heads, triton.cdiv(seq_len, meta["BLOCK_SEQ_KV"]))
+    grid_gen = lambda meta: (triton.cdiv(seq_len, meta["BLOCK_SEQ_KV"]), k_heads, batch_size)
     
     flash_decode_generation_kernel[grid_gen](
         q,
@@ -279,7 +279,7 @@ def flash_decode_out(
     n_blocks_actual = triton.cdiv(seq_len, best_block_seq_kv)
     
     # Launch Reduction Kernel
-    grid_reduce = (batch_size, q_heads)
+    grid_reduce = (q_heads, batch_size)
     stride_out_batch, stride_out_head, _, _ = out.stride()
     
     flash_decode_reduce_kernel[grid_reduce](
