@@ -6,20 +6,26 @@ import triton.testing
 
 from kernels.flash_decode import flash_decode_out
 
+try:
+    from flash_attn import flash_attn_with_kvcache
+except ImportError:
+    flash_attn_with_kvcache = None
+
+
 
 def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, save_plot=False):
     device = 'cuda'
     dtype = torch.float16
     gqa_ratio = num_q_heads // num_kv_heads
 
-    print(f"| {'Sequence Length':<15} | {'Triton Pre-alloc (ms)':<22} | {'Triton Dynamic (ms)':<20} | {'SDPA + GQA (ms)':<22} | {'Triton vs SDPA GQA (x)':<24} |")
-    print(f"|{'-'*17}|{'-'*24}|{'-'*22}|{'-'*24}|{'-'*26}|")
+    print(f"| {'Sequence Length':<15} | {'Triton (ms)':<20} | {'SDPA + GQA (ms)':<22} | {'Flash-Decode (ms)':<18} | {'Triton vs Flash-Decode (x)':<28} |")
+    print(f"|{'-'*17}|{'-'*22}|{'-'*24}|{'-'*20}|{'-'*30}|")
 
     results = {
         'seq_len': [],
         'triton_preallocated': [],
-        'triton_dynamic': [],
         'pytorch_sdpa_gqa': [],
+        'flash_decode': [],
     }
 
     for seq_len in seq_lens:
@@ -40,38 +46,45 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
             lambda: flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out)
         )
 
-        # 2. Triton Dynamic
-        def run_dynamic():
-            n_blocks = (seq_len + 31) // 32
-            mo = torch.empty((batch_size, num_kv_heads, n_blocks, gqa_ratio, head_dim), device=device, dtype=dtype)
-            mlse = torch.empty((batch_size, num_kv_heads, n_blocks, gqa_ratio), device=device, dtype=torch.float32)
-            o = torch.empty((batch_size, num_q_heads, 1, head_dim), device=device, dtype=dtype)
-            flash_decode_out(q, k, v, seq_len, mo, mlse, o)
-            return o
-        triton_dyn_ms = triton.testing.do_bench(run_dynamic)
-
-        # 3. PyTorch SDPA with native GQA (enable_gqa=True)
+        # 2. PyTorch SDPA with native GQA (enable_gqa=True)
         sdpa_gqa_ms = triton.testing.do_bench(
             lambda: F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=True)
         )
 
-        speedup_triton_vs_sdpa_gqa = sdpa_gqa_ms / triton_pre_ms
+        # 3. Tri Dao's Flash Decode
+        if flash_attn_with_kvcache is not None:
+            # Inputs transposed to (batch, seqlen, heads, dim)
+            q_fa = q.transpose(1, 2)
+            k_fa = k.transpose(1, 2).contiguous()
+            v_fa = v.transpose(1, 2).contiguous()
+            cache_seqlens = torch.tensor([seq_len] * batch_size, dtype=torch.int32, device=device)
+            
+            flash_decode_ms = triton.testing.do_bench(
+                lambda: flash_attn_with_kvcache(q_fa, k_fa, v_fa, cache_seqlens=cache_seqlens)
+            )
+        else:
+            flash_decode_ms = float('nan')
 
-        print(f"| {seq_len:<15} | {triton_pre_ms:>22.4f} | {triton_dyn_ms:>20.4f} | {sdpa_gqa_ms:>22.4f} | {speedup_triton_vs_sdpa_gqa:>23.2f}x |")
+        speedup_triton_vs_flash_decode = flash_decode_ms / triton_pre_ms if not math.isnan(flash_decode_ms) else float('nan')
+        speedup_str = f"{speedup_triton_vs_flash_decode:>27.2f}x" if not math.isnan(speedup_triton_vs_flash_decode) else f"{'N/A':>28}"
+        flash_decode_str = f"{flash_decode_ms:>18.4f}" if not math.isnan(flash_decode_ms) else f"{'N/A':>18}"
+
+        print(f"| {seq_len:<15} | {triton_pre_ms:>20.4f} | {sdpa_gqa_ms:>22.4f} | {flash_decode_str} | {speedup_str} |")
 
         results['seq_len'].append(seq_len)
         results['triton_preallocated'].append(triton_pre_ms)
-        results['triton_dynamic'].append(triton_dyn_ms)
         results['pytorch_sdpa_gqa'].append(sdpa_gqa_ms)
+        results['flash_decode'].append(flash_decode_ms)
 
     if save_plot:
         try:
             import matplotlib.pyplot as plt
             plt.figure(figsize=(10, 6))
             
-            plt.plot(results['seq_len'], results['triton_preallocated'], label='Triton Flash-Decode (Pre-allocated)', color='blue', linestyle='-', marker='o')
-            plt.plot(results['seq_len'], results['triton_dynamic'], label='Triton Flash-Decode (Dynamic)', color='cyan', linestyle='--', marker='x')
+            plt.plot(results['seq_len'], results['triton_preallocated'], label='Triton Flash-Decode', color='blue', linestyle='-', marker='o')
             plt.plot(results['seq_len'], results['pytorch_sdpa_gqa'], label='PyTorch SDPA (enable_gqa=True)', color='green', linestyle='-', marker='d')
+            if not any(math.isnan(x) for x in results['flash_decode']):
+                plt.plot(results['seq_len'], results['flash_decode'], label="Tri Dao's Flash-Decode", color='red', linestyle='-', marker='s')
             
             plt.xscale('log', base=2)
             plt.yscale('log')

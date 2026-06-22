@@ -10,7 +10,14 @@ dependencies = [
     "torch",
     "triton",
     "transformers",
+]
+
+[project.optional-dependencies]
+test = [
     "pytest",
+]
+benchmark = [
+    "flash-attn",
 ]
 
 [tool.setuptools]
