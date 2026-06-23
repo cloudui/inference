@@ -104,9 +104,9 @@ def flash_decode_generation_kernel(
 
     # Softmax calculation
     max_scores = tl.max(attn_scores, axis=-1)
-    exp_scores = tl.exp(attn_scores - max_scores[:, None])
+    exp_scores = tl.exp2(attn_scores - max_scores[:, None])
     sum_exp = tl.sum(exp_scores, axis=-1)
-    lse = max_scores + tl.log(sum_exp)
+    lse = max_scores + tl.log2(sum_exp)
 
     # Compute weighted sum
     acc = tl.dot(exp_scores.to(tl.float16), v, acc) / sum_exp[:, None]
@@ -190,8 +190,8 @@ def flash_decode_reduce_kernel(
 
         # Update running max LSE and scale factors without tl.log inside the loop
         new_lse_max = tl.maximum(lse_max, block_lse)
-        scale_accum = tl.exp(lse_max - new_lse_max)
-        scale_block = tl.exp(block_lse - new_lse_max)
+        scale_accum = tl.exp2(lse_max - new_lse_max)
+        scale_block = tl.exp2(block_lse - new_lse_max)
 
         # Update accumulators
         d_accum = d_accum * scale_accum + scale_block
@@ -213,6 +213,9 @@ def flash_decode_reduce_kernel(
     tl.store(out_block_ptr, out_accum.to(tl.float16))
     
 
+# for using exp2/log2
+LOG2_E = 1.4426950408889634
+
 def flash_decode_out(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
     mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor
@@ -225,7 +228,8 @@ def flash_decode_out(
     _, k_heads, _, head_dim = k.shape
     
     gqa_ratio = q_heads // k_heads
-    scale = 1 / math.sqrt(head_dim)
+    # Scale scores by log2(e) to use base-2 exp2/log2 directly in the GPU hardware
+    scale = (1 / math.sqrt(head_dim)) * LOG2_E
     
     # Stride calculation for input and intermediate tensors
     stride_q_batch, stride_q_head, _, _ = q.stride()
