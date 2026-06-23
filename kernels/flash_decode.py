@@ -39,14 +39,22 @@ def flash_decode_generation_kernel(
     BLOCK_SEQ_KV: tl.constexpr,
     BLOCK_HEAD_DIM: tl.constexpr,
     gqa_ratio: tl.constexpr,
+    NUM_SPLITS: tl.constexpr,
 ):
     # BLOCK_GQA represents the GQA dimension size for tl.dot tensor core requirements.
     BLOCK_GQA: tl.constexpr = 16
 
     # Program axes
-    pid_kv = tl.program_id(axis=0)     # Index of the KV block
+    pid_kv = tl.program_id(axis=0)     # Index of the KV split
     pid_head = tl.program_id(axis=1)   # Index of the KV head
     pid_batch = tl.program_id(axis=2)  # Index of the Batch
+
+    # Calculate block indexing range for this split
+    total_blocks = tl.cdiv(seq_len, BLOCK_SEQ_KV)
+    blocks_per_split = tl.cdiv(total_blocks, NUM_SPLITS)
+    start_block = pid_kv * blocks_per_split
+    end_block = tl.minimum(start_block + blocks_per_split, total_blocks)
+    blocks_to_process = tl.maximum(0, end_block - start_block)
 
     # Base pointers with batch offsets
     q_batch_ptr = q_ptr + pid_batch * stride_q_batch
@@ -66,50 +74,67 @@ def flash_decode_generation_kernel(
         order=(1, 0)
     )
 
-    # Create block pointers for K and V
+    # Base pointers for K and V
     k_start_ptr = k_batch_ptr + pid_head * stride_k_head
     v_start_ptr = v_batch_ptr + pid_head * stride_k_head
 
-    k_block_ptr = tl.make_block_ptr(
-        base=k_start_ptr,
-        shape=(seq_len, head_dim),
-        strides=(stride_k_seq, 1),
-        offsets=(pid_kv * BLOCK_SEQ_KV, 0),
-        block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
-        order=(1, 0)
-    )
-    v_block_ptr = tl.make_block_ptr(
-        base=v_start_ptr,
-        shape=(seq_len, head_dim),
-        strides=(stride_k_seq, 1),
-        offsets=(pid_kv * BLOCK_SEQ_KV, 0),
-        block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
-        order=(1, 0)
-    )
-
-    # Load blocks using boundary checks
+    # Load Q once
     q = tl.load(q_block_ptr, boundary_check=(0, 1))
-    k = tl.load(k_block_ptr, boundary_check=(0, 1))
-    v = tl.load(v_block_ptr, boundary_check=(0, 1))
 
-    # Compute attention scores
+    # Initialize running softmax statistics for this split
+    lse_max = tl.full([BLOCK_GQA], float("-inf"), dtype=tl.float32)
+    d_accum = tl.zeros([BLOCK_GQA], dtype=tl.float32)
     acc = tl.zeros((BLOCK_GQA, BLOCK_HEAD_DIM), dtype=tl.float32)
-    attn_scores = tl.dot(q, tl.trans(k)) * scale
 
-    # Mask rows attention to -inf (seqlen mod BLOCK_SEQ_KV != 0)
-    # for out-of-bounds rows. exp(-inf) = 0
-    kv_indices = pid_kv * BLOCK_SEQ_KV + tl.arange(0, BLOCK_SEQ_KV)
-    kv_mask = kv_indices[None, :] < seq_len
-    attn_scores = tl.where(kv_mask, attn_scores, float("-inf"))
+    for i in tl.range(blocks_to_process):
+        block_idx = start_block + i
+        k_block_ptr = tl.make_block_ptr(
+            base=k_start_ptr,
+            shape=(seq_len, head_dim),
+            strides=(stride_k_seq, 1),
+            offsets=(block_idx * BLOCK_SEQ_KV, 0),
+            block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
+            order=(1, 0)
+        )
+        v_block_ptr = tl.make_block_ptr(
+            base=v_start_ptr,
+            shape=(seq_len, head_dim),
+            strides=(stride_k_seq, 1),
+            offsets=(block_idx * BLOCK_SEQ_KV, 0),
+            block_shape=(BLOCK_SEQ_KV, BLOCK_HEAD_DIM),
+            order=(1, 0)
+        )
 
-    # Softmax calculation
-    max_scores = tl.max(attn_scores, axis=-1)
-    exp_scores = tl.exp2(attn_scores - max_scores[:, None])
-    sum_exp = tl.sum(exp_scores, axis=-1)
-    lse = max_scores + tl.log2(sum_exp)
+        k = tl.load(k_block_ptr, boundary_check=(0, 1))
+        v = tl.load(v_block_ptr, boundary_check=(0, 1))
 
-    # Compute weighted sum
-    acc = tl.dot(exp_scores.to(tl.float16), v, acc) / sum_exp[:, None]
+        # Compute attention scores
+        attn_scores = tl.dot(q, tl.trans(k)) * scale
+
+        # Mask rows attention to -inf (seqlen mod BLOCK_SEQ_KV != 0)
+        # for out-of-bounds rows. exp(-inf) = 0
+        kv_indices = block_idx * BLOCK_SEQ_KV + tl.arange(0, BLOCK_SEQ_KV)
+        kv_mask = kv_indices[None, :] < seq_len
+        attn_scores = tl.where(kv_mask, attn_scores, float("-inf"))
+
+        # Softmax calculation for this block
+        max_scores = tl.max(attn_scores, axis=-1)
+        new_lse_max = tl.maximum(lse_max, max_scores)
+        scale_accum = tl.exp2(lse_max - new_lse_max)
+
+        # exp_scores for current block scaled to new maximum
+        exp_scores = tl.exp2(attn_scores - new_lse_max[:, None])
+        sum_exp = tl.sum(exp_scores, axis=-1)
+
+        # Update running softmax statistics
+        d_accum = d_accum * scale_accum + sum_exp
+        acc = acc * scale_accum[:, None] + tl.dot(exp_scores.to(tl.float16), v)
+        lse_max = new_lse_max
+
+    # Normalize accumulator and compute final LSE
+    den = tl.where(d_accum[:, None] > 0, d_accum[:, None], 1.0)
+    acc = acc / den
+    lse = lse_max + tl.log2(d_accum)
 
     # Store intermediate accumulator (Mid_O)
     mid_o_start_ptr = mid_o_batch_ptr + pid_head * stride_mid_o_head + pid_kv * stride_mid_o_block
@@ -218,7 +243,8 @@ LOG2_E = 1.4426950408889634
 
 def flash_decode_out(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
-    mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor
+    mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor,
+    num_splits: int = 16
 ) -> None:
     """Computes Grouped-Query Attention (GQA) using a Split-KV flash decoding approach.
     Uses pre-allocated intermediate tensors (mid_o, mid_lse) and output tensor (out).
@@ -241,9 +267,8 @@ def flash_decode_out(
     # # Reset intermediate lse buffer to float("-inf") for reduction kernel
     # mid_lse.fill_(float("-inf"))
     
-    # The generation grid is a lambda that dynamically reads the current BLOCK_SEQ_KV
-    # being benchmarked by the autotuner.
-    grid_gen = lambda meta: (triton.cdiv(seq_len, meta["BLOCK_SEQ_KV"]), k_heads, batch_size)
+    # The generation grid size is now num_splits along the KV axis
+    grid_gen = lambda meta: (num_splits, k_heads, batch_size)
     
     flash_decode_generation_kernel[grid_gen](
         q,
@@ -269,17 +294,8 @@ def flash_decode_out(
         stride_mid_lse_gqa,
         BLOCK_HEAD_DIM=head_dim,
         gqa_ratio=gqa_ratio,
+        NUM_SPLITS=num_splits,
     )
-    
-    # Retrieve the best selected configuration and compute actual block count for reduction
-    best_config = flash_decode_generation_kernel.best_config
-    if best_config is not None:
-        best_block_seq_kv = best_config.kwargs["BLOCK_SEQ_KV"]
-    else:
-        # Fallback when compilation/tuning hasn't finished or is in a non-autotuned path
-        best_block_seq_kv = 64
-        
-    n_blocks_actual = triton.cdiv(seq_len, best_block_seq_kv)
     
     # Launch Reduction Kernel
     grid_reduce = (q_heads, batch_size)
@@ -290,7 +306,7 @@ def flash_decode_out(
         mid_lse,
         out,
         gqa_ratio,
-        n_blocks_actual,
+        num_splits,
         stride_mid_o_batch,
         stride_mid_o_head,
         stride_mid_o_gqa,
@@ -307,26 +323,25 @@ def flash_decode_out(
 
 def flash_decode(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
+    num_splits: int = 16
 ) -> torch.Tensor:
     batch_size = q.shape[0]
     q_heads = q.shape[1]
     _, k_heads, _, head_dim = k.shape
     
-    min_block_seq_kv = 32
-    n_blocks_max = triton.cdiv(seq_len, min_block_seq_kv)
     gqa_ratio = q_heads // k_heads
     
     mid_o = torch.empty(
-        (batch_size, k_heads, n_blocks_max, gqa_ratio, head_dim), 
+        (batch_size, k_heads, num_splits, gqa_ratio, head_dim), 
         device=q.device, 
         dtype=torch.float16
     )
     mid_lse = torch.empty(
-        (batch_size, k_heads, n_blocks_max, gqa_ratio), 
+        (batch_size, k_heads, num_splits, gqa_ratio), 
         device=q.device, 
         dtype=torch.float32
     )
     out = torch.empty((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
     
-    flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out)
+    flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out, num_splits=num_splits)
     return out

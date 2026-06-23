@@ -61,37 +61,41 @@ def run_gpu_sanity_check():
     batch_size = 4
     q_heads = 32
     k_heads = 8
-    seq_len = 512
     head_dim = 128
 
-    print(f"\nInitializing test tensors with dimensions:")
-    print(f"  Batch Size: {batch_size}")
-    print(f"  Query Heads: {q_heads}")
-    print(f"  KV Heads: {k_heads} (GQA Ratio: {q_heads // k_heads})")
-    print(f"  Sequence Length: {seq_len}")
-    print(f"  Head Dimension: {head_dim}")
+    seq_lens = [128, 512, 2048, 4096, 8192]
+    num_splits_list = [4, 8, 16, 32]
 
-    # Generate random input tensors
-    q = torch.randn(batch_size, q_heads, 1, head_dim, device=device, dtype=torch.float16)
-    k = torch.randn(batch_size, k_heads, seq_len, head_dim, device=device, dtype=torch.float16)
-    v = torch.randn(batch_size, k_heads, seq_len, head_dim, device=device, dtype=torch.float16)
+    all_passed = True
 
-    print("\nExecuting PyTorch naive GQA baseline...")
-    # Run naive baseline (using float32 for higher precision reference)
-    out_naive = pytorch_gqa_naive(q.float(), k.float(), v.float()).half()
+    for seq_len in seq_lens:
+        for num_splits in num_splits_list:
+            print(f"\nTesting dimensions: seq_len={seq_len}, num_splits={num_splits}")
+            # Generate random input tensors
+            q = torch.randn(batch_size, q_heads, 1, head_dim, device=device, dtype=torch.float16)
+            k = torch.randn(batch_size, k_heads, seq_len, head_dim, device=device, dtype=torch.float16)
+            v = torch.randn(batch_size, k_heads, seq_len, head_dim, device=device, dtype=torch.float16)
 
-    print("Executing Triton Flash Decode kernel...")
-    # Run our Triton flash_decode kernel
-    out_triton = flash_decode(q, k, v, seq_len)
+            # Run naive baseline (using float32 for higher precision reference)
+            out_naive = pytorch_gqa_naive(q.float(), k.float(), v.float()).half()
 
-    # Check match
-    max_diff = torch.abs(out_triton.float() - out_naive.float()).max().item()
-    print(f"\nMax absolute difference: {max_diff:.6f}")
+            # Run our Triton flash_decode kernel
+            out_triton = flash_decode(q, k, v, seq_len, num_splits=num_splits)
 
-    if torch.allclose(out_triton.float(), out_naive.float(), atol=1e-3):
-        print("SUCCESS: Triton Flash Decode outputs match PyTorch baseline perfectly!")
+            # Check match
+            max_diff = torch.abs(out_triton.float() - out_naive.float()).max().item()
+
+            if torch.allclose(out_triton.float(), out_naive.float(), atol=1e-3):
+                print(f"  SUCCESS: Triton Flash Decode outputs match PyTorch baseline perfectly (max diff: {max_diff:.6f})")
+            else:
+                print(f"  FAILURE: Outputs mismatch between Triton kernel and PyTorch baseline (max diff: {max_diff:.6f})")
+                all_passed = False
+
+    if all_passed:
+        print("\nALL GPU SANITY CHECKS PASSED SUCCESSFULLY!")
     else:
-        print("FAILURE: Outputs mismatch between Triton kernel and PyTorch baseline.")
+        print("\nSOME GPU SANITY CHECKS FAILED!")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

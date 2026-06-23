@@ -34,11 +34,10 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
         k = torch.randn(batch_size, num_kv_heads, seq_len, head_dim, device=device, dtype=dtype)
         v = torch.randn(batch_size, num_kv_heads, seq_len, head_dim, device=device, dtype=dtype)
 
-        # Pre-allocate Triton buffers
-        min_block_seq_kv = 32
-        n_blocks_max = (seq_len + min_block_seq_kv - 1) // min_block_seq_kv
-        mid_o = torch.empty((batch_size, num_kv_heads, n_blocks_max, gqa_ratio, head_dim), device=device, dtype=dtype)
-        mid_lse = torch.empty((batch_size, num_kv_heads, n_blocks_max, gqa_ratio), device=device, dtype=torch.float32)
+        # Pre-allocate Triton buffers using num_splits
+        num_splits = 16
+        mid_o = torch.empty((batch_size, num_kv_heads, num_splits, gqa_ratio, head_dim), device=device, dtype=dtype)
+        mid_lse = torch.empty((batch_size, num_kv_heads, num_splits, gqa_ratio), device=device, dtype=torch.float32)
         out = torch.empty((batch_size, num_q_heads, 1, head_dim), device=device, dtype=dtype)
 
         # 1. Triton Pre-allocated
@@ -113,5 +112,5 @@ if __name__ == '__main__':
     print(f"  Batch Size: {args.batch_size} | Q Heads: {args.q_heads} | KV Heads: {args.kv_heads} | Head Dim: {args.head_dim}")
     print("=========================================================================\n")
     
-    seq_lens = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+    seq_lens = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
     run_benchmark(args.batch_size, args.q_heads, args.kv_heads, args.head_dim, seq_lens, args.save_plot)
