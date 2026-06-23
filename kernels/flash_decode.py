@@ -171,36 +171,35 @@ def flash_decode_reduce_kernel(
     mid_o_start_ptr = mid_o_batch_ptr + kv_head_idx * stride_mid_o_head + q_subhead_idx * stride_mid_o_gqa
     mid_lse_start_ptr = mid_lse_batch_ptr + kv_head_idx * stride_mid_lse_head + q_subhead_idx * stride_mid_lse_gqa
 
-    # Initialize running softmax statistics (LSE accumulator and output accumulator)
-    lse_accum = tl.full([1], float("-inf"), dtype=tl.float32)
+    # Initialize running softmax statistics (LSE maximum, exponent sum, and output accumulator)
+    lse_max = tl.full([1], float("-inf"), dtype=tl.float32)
+    d_accum = tl.zeros([1], dtype=tl.float32)
     out_accum = tl.zeros([BLOCK_HEAD_DIM], dtype=tl.float32)
+
+    # Precompute 1D offset pointer tensor for loading contiguous head_dim elements
+    offsets = tl.arange(0, BLOCK_HEAD_DIM)
+    mid_o_ptrs = mid_o_start_ptr + offsets
 
     # Loop over all split-KV blocks to reduce them online
     for block_idx in tl.range(n_blocks):
-        # Load block intermediate output using block pointer (exact size BLOCK_HEAD_DIM)
-        mid_o_block_ptr = tl.make_block_ptr(
-            base=mid_o_start_ptr + block_idx * stride_mid_o_block,
-            shape=(BLOCK_HEAD_DIM,),
-            strides=(1,),
-            offsets=(0,),
-            block_shape=(BLOCK_HEAD_DIM,),
-            order=(0,)
-        )
-        block_acc = tl.load(mid_o_block_ptr)
+        # Load block intermediate output using simple pointer offsets
+        block_acc = tl.load(mid_o_ptrs + block_idx * stride_mid_o_block)
 
         # Load scalar block LSE
         block_lse = tl.load(mid_lse_start_ptr + block_idx * stride_mid_lse_block)
 
-        # Update Log-Sum-Exp
-        max_lse = tl.maximum(lse_accum, block_lse)
-        new_lse = max_lse + tl.log(tl.exp(lse_accum - max_lse) + tl.exp(block_lse - max_lse))
+        # Update running max LSE and scale factors without tl.log inside the loop
+        new_lse_max = tl.maximum(lse_max, block_lse)
+        scale_accum = tl.exp(lse_max - new_lse_max)
+        scale_block = tl.exp(block_lse - new_lse_max)
 
-        # Re-scale running output accumulator and accumulate block output
-        scale_accum = tl.exp(lse_accum - new_lse)
-        scale_block = tl.exp(block_lse - new_lse)
-        out_accum = scale_accum * out_accum + scale_block * block_acc
+        # Update accumulators
+        d_accum = d_accum * scale_accum + scale_block
+        out_accum = out_accum * scale_accum + block_acc * scale_block
+        lse_max = new_lse_max
 
-        lse_accum = new_lse
+    # Final normalization outside the loop
+    out_accum = out_accum / d_accum
 
     # Write out final reduced values
     out_block_ptr = tl.make_block_ptr(
