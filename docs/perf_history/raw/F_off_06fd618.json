@@ -1,0 +1,70 @@
+{
+ "repo": "wt/06fd618",
+ "hooks": "off",
+ "status": "ok",
+ "stage": "done",
+ "n_record_function_in_model": 18,
+ "randomized_example": [
+  "embed_tokens(128256, 4096)",
+  "lm_head(4096, 128256)",
+  "norm.weight(4096,)",
+  "L0.self_attn.wqkv(4096, 6144)",
+  "L0.self_attn.wo(4096, 4096)",
+  "L0.mlp.w_gate(4096, 14336)",
+  "L0.mlp.w_up(4096, 14336)",
+  "L0.mlp.w_down(14336, 4096)",
+  "L0.input_layernorm.weight(4096,)",
+  "L0.post_attention_layernorm.weight(4096,)"
+ ],
+ "moved": [
+  "cos(8192, 64):torch.float32",
+  "sin(8192, 64):torch.float32"
+ ],
+ "runs": [
+  {
+   "wall_ms": 2923.4213288873434,
+   "cuda_ms": 2923.359619140625,
+   "enqueue_ms": 2910.63916310668,
+   "finite": true,
+   "tok_s": 43.78431488310886
+  },
+  {
+   "wall_ms": 2834.148382768035,
+   "cuda_ms": 2834.0859375,
+   "enqueue_ms": 2803.174262866378,
+   "finite": true,
+   "tok_s": 45.16347865844128
+  },
+  {
+   "wall_ms": 2842.606356367469,
+   "cuda_ms": 2842.53857421875,
+   "enqueue_ms": 2811.6272166371346,
+   "finite": true,
+   "tok_s": 45.02909793094588
+  },
+  {
+   "wall_ms": 2870.4268280416727,
+   "cuda_ms": 2870.3544921875,
+   "enqueue_ms": 2868.881646543741,
+   "finite": true,
+   "tok_s": 44.59267128830699
+  },
+  {
+   "wall_ms": 2852.1388098597527,
+   "cuda_ms": 2852.06591796875,
+   "enqueue_ms": 2821.1835883557796,
+   "finite": true,
+   "tok_s": 44.878601124709675
+  }
+ ],
+ "median_tok_s": 44.878601124709675,
+ "min_tok_s": 43.78431488310886,
+ "max_tok_s": 45.16347865844128,
+ "median_ms_per_tok": 22.282334452029318,
+ "median_enqueue_ms_per_tok": 22.04049678402953,
+ "output_finite": true,
+ "env": {
+  "torch": "2.8.0+cu128",
+  "gpu": "NVIDIA RTX PRO 4500 Blackwell"
+ }
+}

@@ -1,0 +1,181 @@
+{
+ "139f8f1": {
+  "summary": "First model.py skeleton (RMSNorm/Attention/MLP classes); Llama.forward is a stub",
+  "notes": "Not runnable: forward raises NotImplementedError"
+ },
+ "1d59c2e": {
+  "summary": "flash_decode: drop unused return values",
+  "notes": "Not runnable (forward stub)"
+ },
+ "ea91968": {
+  "summary": "PyTorch RoPE (freqs_cis complex) in model.py",
+  "notes": "Not runnable (forward stub)"
+ },
+ "c0e5b75": {
+  "summary": "Adds kernels/__init__.py + pyproject (package layout)",
+  "notes": "Not runnable (forward stub)"
+ },
+ "c0bcafc": {
+  "summary": "flash_decode ported to block-ptr API + batch dim",
+  "notes": "Not runnable (forward stub)"
+ },
+ "8a9a61a": {
+  "summary": "flash_decode: mask tail KV block for seq_len not multiple of BLOCK",
+  "notes": "Not runnable (forward stub)"
+ },
+ "df1fff2": {
+  "summary": "Attention.__call__ implemented (x@wq/wk/wv, PyTorch RoPE, FD kernel)",
+  "notes": "Not runnable (forward stub)"
+ },
+ "c7d66d4": {
+  "summary": "RoPE helper cleanup (rotate_half)",
+  "notes": "Not runnable (forward stub)"
+ },
+ "820da53": {
+  "summary": "flash_decode grid: batch moved to axis 0",
+  "notes": "Not runnable (forward stub)"
+ },
+ "3fb1ca1": {
+  "summary": "RMSNorm kernel output dtype cast fix",
+  "notes": "Not runnable (forward stub)"
+ },
+ "376fc0a": {
+  "summary": "DecoderLayer implemented",
+  "notes": "Not runnable (forward stub)"
+ },
+ "c9466dc": {
+  "summary": "Llama.forward implemented (embed -> layers -> norm -> lm_head)",
+  "notes": "Fails: model.py does `import kernels.rmsnorm as rmsnorm` then calls the module"
+ },
+ "47f2485": {
+  "summary": "from_pretrained weight loading; import cleanup",
+  "notes": "Fails: same module-not-callable import bug"
+ },
+ "faa0fad": {
+  "summary": "Removes a torch.cuda.synchronize() inside flash_decode",
+  "notes": "Fails: same import bug (so the sync removal can't be measured in isolation)"
+ },
+ "f29a855": {
+  "summary": "triton.autotune on flash-decode generation kernel, key=[seq_len, head_dim]",
+  "notes": "Fails: same import bug. Autotune key includes seq_len -> re-tunes on every new decode position"
+ },
+ "e911b4f": {
+  "summary": "kernels/__init__ re-exports functions; fixes import bug",
+  "notes": "FIRST RUNNABLE COMMIT. Baseline: PyTorch RoPE (~10 small ops/layer), separate q/k/v/gate/up GEMMs, per-step allocations",
+  "short": "first runnable"
+ },
+ "95a4e01": {
+  "summary": "Wraps every op in torch.profiler.record_function (15 scopes/layer \u2192 483 per decode step); otherwise same ops (v proj moved before RoPE)",
+  "notes": "Hooks-on column is where the profiler cost appears; primary column stubs record_function",
+  "short": "record_function hooks"
+ },
+ "da06b00": {
+  "summary": "Adds Triton rope_decode kernel; changes cos/sin tables to head_dim/2 but model still uses PyTorch RoPE",
+  "notes": "Fails: RoPE shape mismatch (128 vs 64)"
+ },
+ "5911924": {
+  "summary": "Concatenates wq/wk/wv into one wqkv GEMM + torch.split",
+  "notes": "Fails: RoPE shape mismatch inherited from da06b00. QKV fusion is only measurable bundled into 7d5c517"
+ },
+ "7d5c517": {
+  "summary": "model.py switches to Triton apply_rope_decode (q and k)",
+  "notes": "BUNDLE: first measurable commit after da06b00+5911924, so it carries Triton RoPE + fused QKV GEMM",
+  "short": "Triton RoPE + fused QKV"
+ },
+ "06fd618": {
+  "summary": "flash-decode autotune key drops seq_len (key=[head_dim])",
+  "notes": "Fixed benchmark replays the same 128 positions, which hides per-seq_len re-tuning; see fresh-position side test",
+  "short": "FD autotune key fix"
+ },
+ "5a7b6c0": {
+  "summary": "*_out kernel variants + preallocated per-layer output buffers; matmul(out=); mid_lse.fill_(-inf) added",
+  "notes": "Removes per-step torch.empty/zeros allocations",
+  "short": "preallocated buffers"
+ },
+ "d326973": {
+  "summary": "Concatenates gate/up weights into one w_gate_up GEMM + split",
+  "notes": "One 4096x28672 GEMV instead of two 4096x14336",
+  "short": "fused gate+up GEMM"
+ },
+ "888a9e9": {
+  "summary": "Buffer sizing uses config.max_position_embeddings instead of hard-coded 8192",
+  "notes": "No-op for this config (8192 either way); acts as a noise control"
+ },
+ "1ce61e5": {
+  "summary": "Adds fused_rope_cache.py kernel file (not imported)",
+  "notes": "No runtime change; noise control"
+ },
+ "c05b0b7": {
+  "summary": "Exports fused_rope_cache from kernels/__init__; kernel bugfixes",
+  "notes": "Kernel still unused by model.py; noise control"
+ },
+ "cd9b714": {
+  "summary": "Attention uses fused_rope_cache_decode_out: RoPE(q,k) + K/V cache write in one kernel",
+  "notes": "Replaces split/view/transpose + 2 RoPE launches + 2 slice-assign copies",
+  "short": "fused RoPE+KV write"
+ },
+ "179f662": {
+  "summary": "flash_decode takes explicit seq_len; stops slicing K[:, :, :pos+1]",
+  "notes": "Saves 2 view creations per layer (CPU only)"
+ },
+ "ef70981": {
+  "summary": "Weights stored (out,in) HF-native; matmuls use W.T (column-major) for GEMV dispatch",
+  "notes": "Changes the cuBLAS kernel chosen for every projection + lm_head"
+ },
+ "e4d2320": {
+  "summary": "Removes mid_lse.fill_(-inf) before flash-decode",
+  "notes": "One fewer launch per layer"
+ },
+ "d5b441e": {
+  "summary": "RoPE kernel indexes full cos/sin tables with cache_pos instead of per-step slicing",
+  "notes": "Removes 2 slice ops per step (CPU only)"
+ },
+ "b27cecc": {
+  "summary": "RMSNorm: drop autotuned BLOCK_SIZE list/prune; BLOCK_SIZE=next_pow2(N), autotune num_warps only",
+  "notes": "Also removes unused fused_rmsnorm_swiglu export"
+ },
+ "39266b3": {
+  "summary": "Adds fused_add_rmsnorm kernel (not yet used by model.py); deletes fused_rmsnorm_swiglu",
+  "notes": "No model.py change; noise control"
+ },
+ "d8008bc": {
+  "summary": "Shared BufferPool with ping/pong hidden buffers across all layers",
+  "notes": "Memory/structure change; same kernel count"
+ },
+ "e2120e5": {
+  "summary": "Post-attention residual add + RMSNorm fused (FusedAddRMSNorm); autotune removed from that kernel",
+  "notes": "Removes 1 add kernel/layer and one hidden-state round trip",
+  "short": "fused add+RMSNorm (post-attn)"
+ },
+ "0f51025": {
+  "summary": "Cross-layer fusion: previous layer's MLP residual add fused into next layer's input RMSNorm; final norm fused too",
+  "notes": "Removes the other add kernel/layer. Broke some tests (API)",
+  "short": "cross-layer add+RMSNorm"
+ },
+ "8cea929": {
+  "summary": "DecoderLayer API cleanup: always returns (residual, mlp_out); drops `fused` flag",
+  "notes": "Same kernels as 0f51025 (API-only)"
+ },
+ "a496b35": {
+  "summary": "Reverse Triton grid order (seq/row on axis 0, batch last) in FD, RMSNorm, fused-add-RMSNorm, RoPE",
+  "notes": "Only launch geometry changes",
+  "short": "grid order reversal"
+ },
+ "a861708": {
+  "summary": "FD reduce kernel: raw pointers instead of block ptrs; running max + denominator instead of log-sum-exp per block",
+  "notes": "Reduce kernel only"
+ },
+ "e9610a1": {
+  "summary": "FD uses exp2/log2 with log2(e)-prescaled softmax scale",
+  "notes": "Micro-optimization"
+ },
+ "9bd7daf": {
+  "summary": "FD generation: fixed 16 splits, each looping over KV blocks (online softmax) instead of one program per KV block",
+  "notes": "Bundles: split-K loop + GQA-block layout changes",
+  "short": "FD fixed 16 splits"
+ },
+ "ebdf877": {
+  "summary": "Adds flash_prefill package + import in kernels/__init__",
+  "notes": "Decode path unchanged; code at HEAD (40dc0b6 only edits README)"
+ }
+}

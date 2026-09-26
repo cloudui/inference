@@ -1,0 +1,27 @@
+{
+ "repo": "wt/f29a855",
+ "hooks": "on",
+ "status": "error",
+ "stage": "warmup",
+ "n_record_function_in_model": 0,
+ "randomized_example": [
+  "embed_tokens(128256, 4096)",
+  "lm_head(4096, 128256)",
+  "norm.weight(4096,)",
+  "L0.self_attn.wq(4096, 4096)",
+  "L0.self_attn.wk(4096, 1024)",
+  "L0.self_attn.wv(4096, 1024)",
+  "L0.self_attn.wo(4096, 4096)",
+  "L0.mlp.w_gate(4096, 14336)",
+  "L0.mlp.w_up(4096, 14336)",
+  "L0.mlp.w_down(14336, 4096)",
+  "L0.input_layernorm.weight(4096,)",
+  "L0.post_attention_layernorm.weight(4096,)"
+ ],
+ "moved": [
+  "cos(8192, 128):torch.float16",
+  "sin(8192, 128):torch.float16"
+ ],
+ "error": "TypeError: 'module' object is not callable",
+ "traceback": "Traceback (most recent call last):\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/bench_fixed.py\", line 127, in <module>\n    one_run()\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/bench_fixed.py\", line 117, in one_run\n    out = model.forward(tok, start_pos=args.seq_len + i, kv_caches=kv)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py\", line 120, in decorate_context\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/f29a855/model.py\", line 309, in forward\n    hidden_states = layer(\n                    ^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/f29a855/model.py\", line 214, in __call__\n    hidden_states = self.input_layernorm(hidden_states)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/f29a855/model.py\", line 96, in __call__\n    return rmsnorm(x, self.weight, self.eps)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: 'module' object is not callable\n"
+}

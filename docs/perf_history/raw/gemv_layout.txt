@@ -1,0 +1,8 @@
+weight              K x N  before (K,N) us  after (N,K).T us  GB/s before  GB/s after
+wqkv            4096x6144             71.2              64.5          707         780
+wo              4096x4096             56.9              44.6          590         752
+w_gate_up      4096x28672            301.7             285.2          778         823
+w_down         14336x4096            145.9             149.6          805         785
+lm_head       4096x128256           1314.9            1284.3          799         818
+
+per-token GEMV time (32 layers + lm_head): before 19.74 ms, after 18.69 ms, saved 1.05 ms

@@ -1,0 +1,25 @@
+{
+ "repo": "wt/5911924",
+ "hooks": "off",
+ "status": "error",
+ "stage": "warmup",
+ "n_record_function_in_model": 18,
+ "randomized_example": [
+  "embed_tokens(128256, 4096)",
+  "lm_head(4096, 128256)",
+  "norm.weight(4096,)",
+  "L0.self_attn.wqkv(4096, 6144)",
+  "L0.self_attn.wo(4096, 4096)",
+  "L0.mlp.w_gate(4096, 14336)",
+  "L0.mlp.w_up(4096, 14336)",
+  "L0.mlp.w_down(14336, 4096)",
+  "L0.input_layernorm.weight(4096,)",
+  "L0.post_attention_layernorm.weight(4096,)"
+ ],
+ "moved": [
+  "cos(8192, 64):torch.float32",
+  "sin(8192, 64):torch.float32"
+ ],
+ "error": "RuntimeError: The size of tensor a (128) must match the size of tensor b (64) at non-singleton dimension 3",
+ "traceback": "Traceback (most recent call last):\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/bench_fixed.py\", line 127, in <module>\n    one_run()\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/bench_fixed.py\", line 117, in one_run\n    out = model.forward(tok, start_pos=args.seq_len + i, kv_caches=kv)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py\", line 120, in decorate_context\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/5911924/model.py\", line 330, in forward\n    hidden_states = layer(\n                    ^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/5911924/model.py\", line 232, in __call__\n    attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/5911924/model.py\", line 155, in __call__\n    q, k = apply_rope(q, k, cos, sin)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/claude-0/-workspace-inference/22edf75f-dcc4-4810-857e-22d8bfb60a87/scratchpad/perfhist/wt/5911924/model.py\", line 78, in apply_rope\n    q_embed = (q * cos) + (rotate_half(q) * sin)\n               ~~^~~~~\nRuntimeError: The size of tensor a (128) must match the size of tensor b (64) at non-singleton dimension 3\n"
+}

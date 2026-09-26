@@ -22,7 +22,7 @@ Every commit that touches `model.py` or `kernels/` was checked out into its own 
 
 ## Methodology
 
-> The scripts referenced below as `harness/…` and the per-run data in `raw/…` live on the local branch **`perf-history-sweep`** (`git checkout perf-history-sweep -- docs/perf_history` to get them). They were a one-off tool for re-measuring old commits; this branch keeps only the findings.
+> This is branch **`perf-history-sweep`**: `main` plus the one-off sweep harness (`harness/`) and per-run data (`raw/`). `main` keeps only the findings.
 
 | | |
 |---|---|
@@ -243,17 +243,36 @@ The numbers in this report were taken before the toggle existed. There, "hooks o
 
 ## Files
 
-On this branch, in `docs/perf_history/`:
+All paths are relative to `docs/perf_history/`.
 
-- `REPORT.md`: this file.
-- `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
 - `performance_history.csv`: one row per benchmarked commit (42), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
 - `throughput_history.png`: the chart above.
+- `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
+- `harness/`:
+  - `bench_fixed.py`: the fixed benchmark
+  - `bench_fresh.py`: fresh-positions variant
+  - `bench_hf_fixed.py`: HF reference
+  - `gemv_layout.py`: `ef70981` microbenchmark
+  - `aggregate.py`: CSV and chart from `raw/`
+  - `summaries.json`: per-commit diff summaries and notes
+  - `commits.txt`: the benchmarked commits
+  - `sweep.sh`: full sweep via temporary worktrees
+- `raw/`: per-run JSON for every sweep (`A_off_*` primary, `B_on_*` hooks-on, `R1/R2_off_*` repeats, `F_off_*` fresh positions, `HF_*`), plus `gemv_layout.txt`.
 
-On branch `perf-history-sweep`:
+Reproduce, from the repo root:
 
-- `harness/`: fixed benchmark, fresh-positions variant, HF reference, GEMV microbenchmark, sweep script (temporary worktrees), CSV/chart generator, per-commit summaries.
-- `raw/`: per-run JSON for every sweep.
-- The reproduce commands.
+```bash
+# one commit
+git worktree add --detach /tmp/wt/<hash> <hash>
+python docs/perf_history/harness/bench_fixed.py --repo /tmp/wt/<hash> --hooks off   # or --hooks on
+git worktree remove /tmp/wt/<hash>
 
-For new measurements on current code, just use `make bench-throughput`. Each run is logged to `benchmarks/results/throughput_runs.csv`.
+# full sweep (about 15 min per mode); outputs go to /tmp/perf_sweep/out
+docs/perf_history/harness/sweep.sh A_off off
+docs/perf_history/harness/sweep.sh B_on on
+
+# HF reference, GEMV layout microbenchmark, CSV + chart (aggregate needs matplotlib)
+python docs/perf_history/harness/bench_hf_fixed.py --mode compile-cg
+python docs/perf_history/harness/gemv_layout.py
+python docs/perf_history/harness/aggregate.py docs/perf_history
+```
