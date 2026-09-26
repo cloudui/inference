@@ -1,4 +1,4 @@
-# From 42 to 51 tok/s: optimizing a Triton LLaMA-3 8B decode engine
+# From 42 to 52.6 tok/s: optimizing a Triton LLaMA-3 8B decode engine
 
 *Measured 2026-09-25; CUDA graphs and long-context results added 2026-09-26. Last updated 2026-09-26.*
 
