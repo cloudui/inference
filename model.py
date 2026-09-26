@@ -6,13 +6,37 @@ No training, no gradient tracking, no HuggingFace abstractions.
 """
 
 import json
+import os
 import torch
 import torch.nn.functional as F
 import math
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from safetensors.torch import load_file
-from torch.profiler import record_function
+from torch.profiler import record_function as _torch_record_function
+
+
+# ── Profiler scopes ───────────────────────────────────────────────────────────
+# record_function scopes cost CPU time even when no profiler is attached (~6 tok/s at
+# batch 1 on 8B, see docs/perf_history/REPORT.md), so they are off by default.
+# Enable with INFERENCE_PROFILE=1 or set_profiling(True).
+
+_PROFILE = os.environ.get("INFERENCE_PROFILE", "0") == "1"
+_NO_SCOPE = nullcontext()
+
+
+def set_profiling(enabled: bool) -> None:
+    global _PROFILE
+    _PROFILE = enabled
+
+
+def profiling_enabled() -> bool:
+    return _PROFILE
+
+
+def record_function(name: str):
+    return _torch_record_function(name) if _PROFILE else _NO_SCOPE
 
 from kernels import (
     rmsnorm, rmsnorm_out,

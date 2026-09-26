@@ -11,7 +11,7 @@ KV cache is pre-filled with random data to simulate mid-sequence decoding.
 import argparse
 import torch
 
-from model import Llama, LlamaConfig
+from model import Llama, LlamaConfig, set_profiling, profiling_enabled
 
 
 def parse_args():
@@ -25,6 +25,9 @@ def parse_args():
     p.add_argument("--batch-size",   type=int, default=1)
     p.add_argument("--small",        action="store_true",
                    help="Use tiny 2-layer config for fast iteration")
+    p.add_argument("--profile-scopes", action="store_true",
+                   help="Keep torch.profiler record_function scopes on (costs CPU time; "
+                        "also enabled by INFERENCE_PROFILE=1)")
     return p.parse_args()
 
 
@@ -75,10 +78,13 @@ def build_model(args):
 def main():
     args = parse_args()
     device = torch.device("cuda")
+    if args.profile_scopes:
+        set_profiling(True)
 
     print(f"\n{'='*60}")
     print(f"  Decode Throughput Benchmark")
     print(f"  seq_len={args.seq_len}  decode_steps={args.decode_steps}  batch={args.batch_size}")
+    print(f"  profiler scopes={'on' if profiling_enabled() else 'off'}")
     print(f"{'='*60}\n")
 
     model, kv_caches, cfg = build_model(args)

@@ -23,7 +23,7 @@ import torch
 from torch.profiler import profile, record_function, ProfilerActivity
 
 # ── local imports ──────────────────────────────────────────────────────────────
-from model import Llama, LlamaConfig
+from model import Llama, LlamaConfig, set_profiling
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
@@ -188,6 +188,7 @@ def estimate_decode_bandwidth(cfg: LlamaConfig, batch: int, seq_len: int) -> dic
 def main():
     args = parse_args()
     device = torch.device("cuda")
+    set_profiling(True)  # this script exists to produce labelled traces
 
     print(f"\n{'='*70}")
     print(f"  Llama Decode Profiler  |  seq_len={args.seq_len}  batch={args.batch_size}")

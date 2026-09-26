@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-hf bench-throughput-hf-small
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-hf bench-throughput-hf-small
 
 # Default target: show help message
 help:
@@ -26,6 +26,7 @@ help:
 	@echo "  make benchmark-hf-small-chrome - Run HF decode profiler with tiny config and export trace"
 	@echo "  make bench-throughput      - Run throughput benchmark (Llama-3 8B defaults)"
 	@echo "  make bench-throughput-small - Run throughput benchmark with a tiny 2-layer config"
+	@echo "  make bench-throughput-profiled - Throughput with record_function scopes on (slower, CPU-bound)"
 	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3 8B defaults)"
 	@echo "  make bench-throughput-hf-small - Run HF throughput benchmark with a tiny 2-layer config"
 	@echo "======================================================================"
@@ -68,6 +69,9 @@ bench-throughput:
 
 bench-throughput-small:
 	python benchmarks/bench_throughput.py --small
+
+bench-throughput-profiled:
+	python benchmarks/bench_throughput.py --profile-scopes
 
 # HF Benchmark & Profiling Targets
 benchmark-hf:
