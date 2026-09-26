@@ -7,7 +7,7 @@ triton
 transformers==5.17.0  # version the perf_history results were measured with
 
 # benching
-flash-attn
+# flash-attn  # optional, only kernels/benchmarks/bench_decode_vs_sdpa.py; builds from source
 # xformers
 
 # CUDA

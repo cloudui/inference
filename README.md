@@ -3,15 +3,16 @@
 A from-scratch decode engine for Llama-3/3.1 8B: hand-written Triton kernels, a single
 preallocated KV cache, and CUDA graphs — no vLLM, no HF `generate`.
 
-96% of spec memory bandwidth on an RTX PRO 4500 Blackwell (32 GB @ 896 GB/s), level with
+96–98% of the practical memory-bandwidth ceiling on an RTX PRO 4500 Blackwell (32 GB,
+896 GB/s spec), level with
 vLLM 0.30 at every context length up to 112K tokens, and 2.2x HF eager at 112K.
 
 ![throughput history](docs/perf_history/throughput_history.png)
 
 ## Highlights
 
-- **51.6 tok/s at a 512-token context**, batch 1, fp16 — 86% of the spec bandwidth ceiling
-  and 94% of what an isolated GEMV actually reaches on this card. Up from 42.3 tok/s on the
+- **52.6 tok/s at a 512-token context**, batch 1, fp16 — 89% of the spec bandwidth ceiling
+  and 97% of what an isolated GEMV actually reaches on this card. Up from 42.3 tok/s on the
   first working commit.
 - **Stays at 96–98% of that ceiling out to 112K tokens** (52.4 → 26.8 tok/s). The whole drop
   is bytes: the KV cache grows to half of what each token reads.
@@ -21,8 +22,8 @@ vLLM 0.30 at every context length up to 112K tokens, and 2.2x HF eager at 112K.
   cross-layer residual-add fusion, and a fused gate/up SwiGLU — see
   [`docs/perf_history/OPTIMIZATIONS.md`](docs/perf_history/OPTIMIZATIONS.md) for what each
   one bought.
-- **CUDA graphs** for the decode step, gated profiler hooks (off by default — they cost 12%
-  of throughput when left on), and Llama 3.1's RoPE frequency scaling for 128K context.
+- **CUDA graphs** for the decode step, gated profiler hooks (off by default — in eager mode
+  they cost 12% of throughput), and Llama 3.1's RoPE frequency scaling for 128K context.
 
 See [`docs/perf_history/REPORT.md`](docs/perf_history/REPORT.md) for the full commit-by-commit
 sweep (every commit touching `model.py`/`kernels/` re-benchmarked in its own worktree) and
@@ -49,6 +50,7 @@ sweep against HF and vLLM.
 
 ```bash
 pip install -r requirements.txt
+pip install -e .                   # makes `model` and `kernels` importable for tests/benchmarks
 
 # tests
 make test                          # or: pytest tests/ && python tests/test_flash_decode.py ...
@@ -78,7 +80,7 @@ docs/perf_history/     the performance write-ups linked above
 ## Docs
 
 - [`docs/perf_history/REPORT.md`](docs/perf_history/REPORT.md) — the full methodology and
-  per-commit results (42 commits, including dead ends)
+  per-commit results (every commit, including dead ends)
 - [`docs/perf_history/OPTIMIZATIONS.md`](docs/perf_history/OPTIMIZATIONS.md) — the short
   version, ranked by measured impact
 - [`docs/perf_history/LONG_CONTEXT.md`](docs/perf_history/LONG_CONTEXT.md) — Llama 3.1 RoPE
