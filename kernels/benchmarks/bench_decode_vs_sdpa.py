@@ -18,8 +18,8 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
     dtype = torch.float16
     gqa_ratio = num_q_heads // num_kv_heads
 
-    print(f"| {'Sequence Length':<15} | {'Triton (ms)':<20} | {'SDPA + GQA (ms)':<22} | {'Flash-Decode (ms)':<18} | {'Triton vs Flash-Decode (x)':<28} |")
-    print(f"|{'-'*17}|{'-'*22}|{'-'*24}|{'-'*20}|{'-'*30}|")
+    print(f"| {'Sequence Length':<15} | {'Triton (ms)':<20} | {'SDPA + GQA (ms)':<22} | {'Flash-Decode (ms)':<18} | {'Triton vs Flash-Decode (x)':<28} | {'Triton GB/s':<11} | {'SDPA GB/s':<9} |")
+    print(f"|{'-'*17}|{'-'*22}|{'-'*24}|{'-'*20}|{'-'*30}|{'-'*13}|{'-'*11}|")
 
     results = {
         'seq_len': [],
@@ -27,6 +27,8 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
         'pytorch_sdpa_gqa': [],
         'flash_decode': [],
     }
+    # K + V bytes each call must read (q and the output are negligible)
+    kv_bytes = lambda seq_len: 2 * batch_size * num_kv_heads * seq_len * head_dim * 2
 
     for seq_len in seq_lens:
         # Generate inputs
@@ -40,9 +42,11 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
         mid_lse = torch.empty((batch_size, num_kv_heads, num_splits, gqa_ratio), device=device, dtype=torch.float32)
         out = torch.empty((batch_size, num_q_heads, 1, head_dim), device=device, dtype=dtype)
 
-        # 1. Triton Pre-allocated
+        # 1. Triton Pre-allocated. seq_len as a device tensor, like the model passes it: a Python
+        # int would add a host->device copy to every timed call
+        seq_len_t = torch.tensor([seq_len], dtype=torch.int32, device=device)
         triton_pre_ms = triton.testing.do_bench(
-            lambda: flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out)
+            lambda: flash_decode_out(q, k, v, seq_len_t, mid_o, mid_lse, out)
         )
 
         # 2. PyTorch SDPA with native GQA (enable_gqa=True)
@@ -68,7 +72,9 @@ def run_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_lens, sav
         speedup_str = f"{speedup_triton_vs_flash_decode:>27.2f}x" if not math.isnan(speedup_triton_vs_flash_decode) else f"{'N/A':>28}"
         flash_decode_str = f"{flash_decode_ms:>18.4f}" if not math.isnan(flash_decode_ms) else f"{'N/A':>18}"
 
-        print(f"| {seq_len:<15} | {triton_pre_ms:>20.4f} | {sdpa_gqa_ms:>22.4f} | {flash_decode_str} | {speedup_str} |")
+        triton_gbs = kv_bytes(seq_len) / (triton_pre_ms * 1e-3) / 1e9
+        sdpa_gbs = kv_bytes(seq_len) / (sdpa_gqa_ms * 1e-3) / 1e9
+        print(f"| {seq_len:<15} | {triton_pre_ms:>20.4f} | {sdpa_gqa_ms:>22.4f} | {flash_decode_str} | {speedup_str} | {triton_gbs:>11.0f} | {sdpa_gbs:>9.0f} |")
 
         results['seq_len'].append(seq_len)
         results['triton_preallocated'].append(triton_pre_ms)
@@ -105,6 +111,9 @@ if __name__ == '__main__':
     parser.add_argument("--q-heads", type=int, default=32, help="Number of Query heads")
     parser.add_argument("--kv-heads", type=int, default=8, help="Number of KV heads")
     parser.add_argument("--head-dim", type=int, default=128, help="Head dimension")
+    parser.add_argument("--seq-lens", type=int, nargs="+",
+                        default=[128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
+                        help="KV lengths to benchmark")
     args = parser.parse_args()
     
     print("=========================================================================")
@@ -112,5 +121,4 @@ if __name__ == '__main__':
     print(f"  Batch Size: {args.batch_size} | Q Heads: {args.q_heads} | KV Heads: {args.kv_heads} | Head Dim: {args.head_dim}")
     print("=========================================================================\n")
     
-    seq_lens = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
-    run_benchmark(args.batch_size, args.q_heads, args.kv_heads, args.head_dim, seq_lens, args.save_plot)
+    run_benchmark(args.batch_size, args.q_heads, args.kv_heads, args.head_dim, args.seq_lens, args.save_plot)
