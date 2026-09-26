@@ -250,7 +250,7 @@ The numbers in this report were taken before the toggle existed. There, "hooks o
 What changed to make that possible:
 - `fused_rope_cache` and `flash_decode` read the position and `seq_len` from a 1-element device tensor. Python ints still work and get converted.
 - `Llama.forward` updates `decode_pos = [pos, pos+1]` with one `torch.add` kernel. A host→device copy is avoided on purpose, because a copy from pageable host memory would make the CPU wait for the GPU.
-- The embedding lookup writes into a static buffer via `index_select(out=)`.
+- The captured step's intermediates, logits included, live in the graph's private memory pool, so their addresses are fixed across replays. (At first the embedding lookup also wrote into a static buffer via `index_select(out=)`. Later the hand-managed `BufferPool`, ping/pong hidden buffers included, and the other static buffers were removed as redundant: `d8008bc`, which added ping/pong, had measured −0.07 tok/s. Only the graph's inputs, the token ids and `decode_pos`, stay static.)
 
 `bench_throughput.py`, 8B, batch 1, 512 context, three repeats each:
 
@@ -262,6 +262,8 @@ What changed to make that possible:
 | graphs, scopes on | 19.05 | 52.5 |
 
 As predicted, the gain is small (about 0.37 ms/token, +2%): with scopes off the loop was already GPU-bound, and graphs only remove per-launch overhead, not the dependency bubbles between back-to-back GEMVs. The bigger effect is robustness: with graphs, profiler scopes and host CPU speed stop mattering.
+
+In the frozen per-commit benchmark (`harness/bench_fixed.py --cuda-graphs`, now the last point on the chart), `03e23c3` measures **52.57** tok/s with hooks stubbed and **52.52** with hooks live, and CPU enqueue drops from 19.0 to 0.03 ms/token. Those runs were on a later pod; a control rerun of `ebdf877` there gave 51.37, against 51.21 in the original sweep (+0.3%).
 
 `tests/test_cuda_graphs.py` checks graph replay against eager decode for 100 steps across KV block boundaries.
 
@@ -277,7 +279,7 @@ On this branch, in `docs/perf_history/`:
 
 - `REPORT.md`: this file.
 - `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
-- `performance_history.csv`: one row per benchmarked commit (42), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
+- `performance_history.csv`: one row per benchmarked commit (43, the last being CUDA graphs), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
 - `throughput_history.png`: the chart above.
 - `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, `long_context_milestones.csv` (optimization #8 at long context), `flash_decode_kernel.csv`, `vllm_comparison.csv`, five charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
 - `harness/`: `bench_ctx.py` and `sweep_milestones.sh`, the long-context milestone harness.

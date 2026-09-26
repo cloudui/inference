@@ -11,6 +11,7 @@ Each commit was re-benchmarked against one frozen benchmark: median of 5 runs ×
 |---|---:|---:|---:|
 | First working engine | 42.3 | 71% | 78% |
 | **Final** | **51.2** | **86%** | **94%** |
+| Final + CUDA graphs | 52.6 | 89% | 97% |
 | HF eager (SDPA) | 44.8 | 75% | 82% |
 | HF `torch.compile` + CUDA graphs | 48.2 | 81% | 89% |
 
@@ -24,11 +25,11 @@ Each commit was re-benchmarked against one frozen benchmark: median of 5 runs ×
 | 2 | **Triton RoPE + fused QKV projection** | Replaced PyTorch RoPE (slice/neg/cat/mul/add, ~10 tiny kernels per layer) with one Triton kernel for q and one for k. Concatenated `wq`/`wk`/`wv` into a single `wqkv` GEMV. | **+3.8 tok/s (+9.1%)** |
 | 3 | **Weight layout for GEMV** | Stored weights in (out, in) layout and multiplied by `W.T`, so each output row is read contiguously. The isolated GEMV for `wo` went from 590 to 752 GB/s. | **+2.9 tok/s (+6.2%)** |
 | 4 | **Fused gate + up projection** | One 4096×28672 GEMV instead of two 4096×14336, then split the output (no copy). | **+1.1 tok/s (+2.5%)** |
-| 5 | **Preallocated buffers, `out=` kernels** | No `torch.zeros`/`empty` per step. Every kernel writes into a buffer allocated once, which also removes three memsets per layer inside flash-decode. | **+0.7 tok/s (+1.6%)** |
+| 5 | **Preallocated buffers, `out=` kernels** | No `torch.zeros`/`empty` per step. Every kernel writes into a buffer allocated once, which also removes three memsets per layer inside flash-decode. Later removed again: once decode runs as a CUDA graph, the graph's private memory pool gives every intermediate a fixed address anyway, and eager decode without the buffers is within 0.1 ms/token. | **+0.7 tok/s (+1.6%)** |
 | 6 | **Fused RoPE + KV-cache write** | One kernel reads the fused QKV output, rotates q and k, and writes k/v straight into the cache. This replaces split/transpose, 2 RoPE launches and 2 copy kernels. | **+0.5 tok/s (+1.1%)** |
 | 7 | **Fused residual-add + RMSNorm** | Post-attention add+norm in one kernel, and the MLP residual add deferred into the next layer's input norm (cross-layer fusion). | **+0.4 tok/s** (two commits) |
 | 8 | **Flash-decode kernel polish** | Raw pointers instead of block pointers in the reduce kernel, running max/denominator instead of per-block log-sum-exp, `exp2` with a log2(e)-prescaled scale, fixed 16 KV splits, reversed grid order. | **+0.2 tok/s** at 512 context; **+29% at 112K** (20.6 → 26.5 tok/s), mostly from the reduce-kernel rewrite |
-| 9 | **CUDA graphs** (after this study, 2026-09-26) | Capture one decode step and replay it. The position moves into a GPU buffer the kernels read, the embedding writes into a static buffer, and warmup runs on a side stream so Triton autotuning finishes before capture. | **+1.0 tok/s (+2%)**, and throughput no longer depends on host CPU or profiler scopes (scopes on: 42.2 → 52.5) |
+| 9 | **CUDA graphs** (after this study, 2026-09-26) | Capture one decode step and replay it. The position moves into a GPU buffer the kernels read, and warmup runs on a side stream so Triton autotuning finishes before capture. | **+1.2 tok/s (+2.3%)** (51.4 → 52.6, frozen benchmark, same machine), and throughput no longer depends on host CPU or profiler scopes (scopes on: 45.2 → 52.5) |
 
 ## Long context (Llama 3.1, up to 112K tokens) — 2026-09-26
 

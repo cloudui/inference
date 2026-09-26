@@ -39,12 +39,11 @@ def record_function(name: str):
     return _torch_record_function(name) if _PROFILE else _NO_SCOPE
 
 from kernels import (
-    rmsnorm, rmsnorm_out,
-    swiglu, swiglu_out,
-    flash_decode, flash_decode_out,
-    apply_rope_decode, apply_rope_decode_out,
+    rmsnorm,
+    swiglu,
+    flash_decode,
     fused_rope_cache_decode_out,
-    fused_add_rmsnorm_out, fused_add_rmsnorm
+    fused_add_rmsnorm,
 )
 
 
@@ -90,53 +89,6 @@ def _parse_rope_scaling(raw: dict | None) -> RopeScalingConfig | None:
         high_freq_factor=raw["high_freq_factor"],
         original_max_position_embeddings=raw["original_max_position_embeddings"],
     )
-
-
-# ── Buffer Pool ───────────────────────────────────────────────────────────────
-
-class BufferPool:
-    """Shared/reusable buffer pool for Llama decode layers."""
-    def __init__(self):
-        self.h_ping = None
-        self.h_pong = None
-        
-        # Attention buffers
-        self.qkv_proj_out = None
-        self.q = None
-        self.mid_o = None
-        self.mid_lse = None
-        self.fd_out = None
-        
-        # MLP buffers
-        self.gate_up_out = None
-        self.act_out = None
-
-    def preallocate(
-        self,
-        config: LlamaConfig,
-        batch_size: int,
-        device: torch.device,
-        dtype: torch.dtype,
-    ):
-        if self.h_ping is not None:
-            return
-        self.h_ping = torch.empty(batch_size, 1, config.hidden_size, device=device, dtype=dtype)
-        self.h_pong = torch.empty(batch_size, 1, config.hidden_size, device=device, dtype=dtype)
-        
-        qkv_concat_dim_size = config.num_attention_heads * config.head_dim + 2 * config.num_key_value_heads * config.head_dim
-        self.qkv_proj_out = torch.empty(batch_size, 1, qkv_concat_dim_size, device=device, dtype=dtype)
-        self.q = torch.empty(batch_size, config.num_attention_heads, 1, config.head_dim, device=device, dtype=dtype)
-        
-        min_block_seq_kv = 32
-        n_blocks_max = (config.max_position_embeddings + min_block_seq_kv - 1) // min_block_seq_kv
-        gqa_ratio = config.num_attention_heads // config.num_key_value_heads
-        self.mid_o = torch.empty(batch_size, config.num_key_value_heads, n_blocks_max, gqa_ratio, config.head_dim, device=device, dtype=dtype)
-        self.mid_lse = torch.empty(batch_size, config.num_key_value_heads, n_blocks_max, gqa_ratio, device=device, dtype=torch.float32)
-        self.fd_out = torch.empty(batch_size, config.num_attention_heads, 1, config.head_dim, device=device, dtype=dtype)
-        
-        self.gate_up_out = torch.empty(batch_size, 1, 2 * config.intermediate_size, device=device, dtype=dtype)
-        self.act_out = torch.empty(batch_size, 1, config.intermediate_size, device=device, dtype=dtype)
-
 
 
 # ── RoPE ──────────────────────────────────────────────────────────────────────
@@ -250,10 +202,7 @@ class RMSNorm:
         self.eps = eps
         self.weight = torch.ones(dim)
 
-    def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
-        if out is not None:
-            rmsnorm_out(x, self.weight, out, self.eps)
-            return out
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return rmsnorm(x, self.weight, self.eps)
 
 class FusedAddRMSNorm:
@@ -263,13 +212,9 @@ class FusedAddRMSNorm:
         self.eps = eps
         self.weight = torch.ones(dim)
 
-    def __call__(self, x: torch.Tensor, residual: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
-        if out is not None:
-            fused_add_rmsnorm_out(x, self.weight, residual, out, self.eps)
-            return residual, out
-        
-        out = fused_add_rmsnorm(x, self.weight, residual, self.eps)
-        return residual, out
+    def __call__(self, x: torch.Tensor, residual: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """residual += x (in place); returns (residual, rmsnorm(residual))."""
+        return residual, fused_add_rmsnorm(x, self.weight, residual, self.eps)
 
 # ── Attention ─────────────────────────────────────────────────────────────────
 
@@ -283,7 +228,6 @@ class Attention:
 
     def __init__(self, config: LlamaConfig):
         self.config = config
-        self.buffer_pool = None
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
         self.head_dim = config.head_dim
@@ -295,18 +239,12 @@ class Attention:
         self.wqkv = torch.empty(qkv_concat_dim_size, config.hidden_size)
         self.wo = torch.empty(config.hidden_size, self.num_heads * self.head_dim)
 
-    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
-        if self.buffer_pool is None:
-            self.buffer_pool = BufferPool()
-        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
-
     def __call__(
         self,
         x: torch.Tensor,
         rope_embeds: tuple[torch.Tensor, torch.Tensor],
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
         cache_position: int | torch.Tensor = 0,
-        out: torch.Tensor | None = None,
         seq_len: int | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """cache_position / seq_len: Python ints, or 1-element int32 device tensors (the form
@@ -316,41 +254,19 @@ class Attention:
             assert not isinstance(cache_position, torch.Tensor), "pass seq_len with a tensor cache_position"
             seq_len = cache_position + 1
 
-        if self.buffer_pool is None or self.buffer_pool.qkv_proj_out is None:
-            self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
-
         with record_function("qkv_proj"):
-            qkv = torch.matmul(x, self.wqkv.T, out=self.buffer_pool.qkv_proj_out)
+            qkv = torch.matmul(x, self.wqkv.T)
 
         with record_function("rope_and_kv_cache_update"):
             K, V = kv_cache
-            fused_rope_cache_decode_out(
-                qkv, 
-                cos,
-                sin,
-                self.buffer_pool.q,
-                K,
-                V,
-                cache_position,
-            )
+            q = torch.empty(x.shape[0], self.num_heads, 1, self.head_dim, device=x.device, dtype=x.dtype)
+            fused_rope_cache_decode_out(qkv, cos, sin, q, K, V, cache_position)
 
         with record_function("flash_decode"):
-            flash_decode_out(
-                self.buffer_pool.q, 
-                K, 
-                V, 
-                seq_len,
-                self.buffer_pool.mid_o, 
-                self.buffer_pool.mid_lse, 
-                self.buffer_pool.fd_out
-            )
-            
+            attn = flash_decode(q, K, V, seq_len)
+
         with record_function("out_proj"):
-            fd_out_reshaped = self.buffer_pool.fd_out.transpose(1, 2).reshape(x.shape)
-            out_tensor = out if out is not None else self.buffer_pool.h_pong
-            out = torch.matmul(fd_out_reshaped, self.wo.T, out=out_tensor)
-        
-        return out
+            return torch.matmul(attn.transpose(1, 2).reshape(x.shape), self.wo.T)
 
 
 # ── MLP (SwiGLU) ──────────────────────────────────────────────────────────────
@@ -365,37 +281,24 @@ class MLP:
 
     def __init__(self, config: LlamaConfig):
         self.config = config
-        self.buffer_pool = None
         self.w_gate_up = torch.empty(2 * config.intermediate_size, config.hidden_size)
         self.w_down = torch.empty(config.hidden_size, config.intermediate_size)
 
-    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        if self.buffer_pool is None:
-            self.buffer_pool = BufferPool()
-        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
-
-    def __call__(self, x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: (batch, seq_len, hidden_size)
         Returns:
             (batch, seq_len, hidden_size)
         """
-        if self.buffer_pool is None or self.buffer_pool.gate_up_out is None:
-            self.preallocate_buffers(x.shape[0], x.device, x.dtype)
-
-        # kernel dispatch
         with record_function("gate_up_proj"):
-            gate_up = torch.matmul(x, self.w_gate_up.T, out=self.buffer_pool.gate_up_out)
+            gate_up = torch.matmul(x, self.w_gate_up.T)
             intermediate_size = self.w_down.shape[1]
             gate, up = torch.split(gate_up, [intermediate_size, intermediate_size], dim=-1)
         with record_function("swiglu"):
-            swiglu_out(up, gate, self.buffer_pool.act_out)
-            act = self.buffer_pool.act_out
+            act = swiglu(up, gate)
         with record_function("down_proj"):
-            out_tensor = out if out is not None else self.buffer_pool.h_pong
-            return torch.matmul(act, self.w_down.T, out=out_tensor)
-
+            return torch.matmul(act, self.w_down.T)
 
 
 # ── Decoder Layer ─────────────────────────────────────────────────────────────
@@ -421,19 +324,6 @@ class DecoderLayer:
             self.input_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = FusedAddRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.max_position_embeddings = config.max_position_embeddings
-        self.buffer_pool = None
-
-    def set_buffer_pool(self, buffer_pool: BufferPool):
-        self.buffer_pool = buffer_pool
-        self.self_attn.buffer_pool = buffer_pool
-        self.mlp.buffer_pool = buffer_pool
-
-    def preallocate_buffers(self, batch_size: int, device: torch.device, dtype: torch.dtype, max_seq_len: int):
-        if self.buffer_pool is None:
-            self.buffer_pool = BufferPool()
-            self.self_attn.buffer_pool = self.buffer_pool
-            self.mlp.buffer_pool = self.buffer_pool
-        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
 
     def __call__(
         self,
@@ -451,21 +341,18 @@ class DecoderLayer:
         Returns:
             (residual, mlp_out) — deferred for the next layer to fuse
         """
-        if self.buffer_pool is None or self.buffer_pool.h_ping is None:
-            self.preallocate_buffers(residual.shape[0], residual.device, residual.dtype, max_seq_len=self.max_position_embeddings)
-
         with record_function("input_norm"):
             if mlp_out is None:
-                normed = self.input_layernorm(residual, out=self.buffer_pool.h_ping)
+                normed = self.input_layernorm(residual)
             else:
-                residual, normed = self.input_layernorm(mlp_out, residual, out=self.buffer_pool.h_ping)
+                residual, normed = self.input_layernorm(mlp_out, residual)
 
         with record_function("attn"):
-            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong, seq_len=seq_len)
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, seq_len=seq_len)
         with record_function("attn_residual_post_norm"):
-            residual, normed2 = self.post_attention_layernorm(attn_out, residual, out=self.buffer_pool.h_ping)
+            residual, normed2 = self.post_attention_layernorm(attn_out, residual)
         with record_function("mlp"):
-            mlp_out = self.mlp(normed2, out=self.buffer_pool.h_pong)
+            mlp_out = self.mlp(normed2)
 
         return residual, mlp_out
 
@@ -499,13 +386,9 @@ class Llama:
         self.cos = freqs_cis.real.contiguous()
         self.sin = freqs_cis.imag.contiguous()
 
-        self.buffer_pool = BufferPool()
-        for layer in self.layers:
-            layer.set_buffer_pool(self.buffer_pool)
-
         # CUDA graphs: one captured decode step per (batch size, KV cache), see enable_cuda_graphs()
         self.use_cuda_graphs = False
-        self._graphs: dict[tuple, tuple[torch.Tensor, torch.cuda.CUDAGraph]] = {}
+        self._graphs: dict[tuple, tuple[torch.Tensor, torch.Tensor, torch.cuda.CUDAGraph]] = {}
 
     # ── KV Cache ──────────────────────────────────────────────────────────
 
@@ -534,16 +417,12 @@ class Llama:
 
     # ── Forward ───────────────────────────────────────────────────────────
 
-    def preallocate_buffers(self, batch_size: int, device: torch.device = torch.device("cuda"), dtype: torch.dtype = torch.float16):
-        self.norm_out = torch.empty(batch_size, 1, self.norm.weight.shape[0], device=device, dtype=dtype)
-        self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[0], device=device, dtype=dtype)
-        self.embed_out = torch.empty(batch_size, 1, self.config.hidden_size, device=device, dtype=dtype)
+    def _allocate_decode_pos(self, device: torch.device):
         # [cache_position, seq_len] on the GPU so kernels read them at run time (graph-replayable)
         self.decode_pos = torch.zeros(2, device=device, dtype=torch.int32)
         self._decode_pos_offsets = torch.tensor([0, 1], device=device, dtype=torch.int32)
         self._cache_pos_view = self.decode_pos[0:1]
         self._seq_len_view = self.decode_pos[1:2]
-        self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
         self._graphs.clear()
 
     def enable_cuda_graphs(self, enabled: bool = True) -> None:
@@ -572,11 +451,11 @@ class Llama:
             kv_caches: per-layer KV caches from allocate_kv_cache()
 
         Returns:
-            Logits tensor of shape (batch, 1, vocab_size). This is a persistent buffer that the
-            next call overwrites; clone it if you need to keep it.
+            Logits tensor of shape (batch, 1, vocab_size). With CUDA graphs this is the graph's
+            output buffer, which the next call overwrites; clone it if you need to keep it.
         """
-        if not hasattr(self, "norm_out") or self.norm_out.shape[0] != token_ids.shape[0] or self.norm_out.device != token_ids.device or self.norm_out.dtype != self.embed_tokens.dtype:
-            self.preallocate_buffers(token_ids.shape[0], device=token_ids.device, dtype=self.embed_tokens.dtype)
+        if not hasattr(self, "decode_pos") or self.decode_pos.device != token_ids.device:
+            self._allocate_decode_pos(token_ids.device)
 
         # one tiny kernel, scalar passed as an argument: no host->device copy that would stall
         torch.add(self._decode_pos_offsets, start_pos, out=self.decode_pos)
@@ -586,13 +465,11 @@ class Llama:
         return self._decode_step(token_ids, kv_caches)
 
     def _decode_step(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
-        """Decode at the position held in self.decode_pos. Allocation-free and host-sync-free,
-        so it can be captured into a CUDA graph."""
-        batch_size = token_ids.shape[0]
+        """Decode at the position held in self.decode_pos. Host-sync-free, so it can be
+        captured into a CUDA graph; the capture's private memory pool gives every intermediate
+        tensor a fixed address, so no buffers need to be preallocated by hand."""
         with record_function("embed_lookup"):
-            torch.index_select(self.embed_tokens, 0, token_ids.reshape(-1),
-                               out=self.embed_out.view(batch_size, -1))
-            residual = self.embed_out
+            residual = self.embed_tokens[token_ids]
 
         mlp_out = None
         for i, layer in enumerate(self.layers):
@@ -607,20 +484,18 @@ class Llama:
                 )
         
         with record_function("final_norm"):
-            _, x = self.norm(mlp_out, residual, out=self.norm_out)
+            _, x = self.norm(mlp_out, residual)
         with record_function("lm_head"):
-            out = torch.matmul(x, self.lm_head.T, out=self.lm_head_out)
-
-        return out
+            return torch.matmul(x, self.lm_head.T)
 
     def _graph_decode_step(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
         key = (token_ids.shape[0], kv_caches[0][0].data_ptr())
         if key not in self._graphs:
             self._graphs[key] = self._capture_decode_graph(token_ids, kv_caches)
-        static_tokens, graph = self._graphs[key]
+        static_tokens, static_logits, graph = self._graphs[key]
         static_tokens.copy_(token_ids)
         graph.replay()
-        return self.lm_head_out
+        return static_logits
 
     def _capture_decode_graph(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]):
         static_tokens = token_ids.clone()
@@ -636,8 +511,8 @@ class Llama:
 
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
-            self._decode_step(static_tokens, kv_caches)
-        return static_tokens, graph
+            static_logits = self._decode_step(static_tokens, kv_caches)
+        return static_tokens, static_logits, graph
 
     # ── Weight Loading ────────────────────────────────────────────────────
 

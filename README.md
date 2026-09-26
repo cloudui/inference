@@ -36,7 +36,7 @@ sweep against HF and vLLM.
 - Triton kernels: fused RoPE + KV-cache write, flash-decode (split-K, online softmax),
   RMSNorm (+ fused residual add), SwiGLU
 - Fused QKV and gate/up projections, `(out, in)` weight layout for contiguous GEMV reads
-- Single preallocated KV cache with ping-pong buffering, CUDA graph decode
+- Single preallocated KV cache, CUDA graph decode
 - fp16, PyTorch 2.8 / Triton 3.4
 - HuggingFace-equivalent benchmarks (eager, `torch.compile`, CUDA graphs) for comparison
 
