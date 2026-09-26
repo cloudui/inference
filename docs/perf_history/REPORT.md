@@ -241,6 +241,30 @@ Checked with `bench_throughput.py` at HEAD: scopes off **51.6** tok/s, `--profil
 
 The numbers in this report were taken before the toggle existed. There, "hooks off" means the harness stubbed `torch.profiler.record_function`. For commits after the toggle, `harness/bench_fixed.py --hooks on` also sets `INFERENCE_PROFILE=1`, so both modes stay comparable across old and new commits.
 
+## Follow-up: CUDA graphs (branch `cuda-graphs`)
+
+`model.enable_cuda_graphs()` (or `bench_throughput.py --cuda-graphs`) captures one decode step per (batch size, KV cache) and replays it.
+
+What changed to make that possible:
+- `fused_rope_cache` and `flash_decode` read the position and `seq_len` from a 1-element device tensor. Python ints still work and get converted.
+- `Llama.forward` updates `decode_pos = [pos, pos+1]` with one `torch.add` kernel. A host→device copy is avoided on purpose, because a copy from pageable host memory would make the CPU wait for the GPU.
+- The embedding lookup writes into a static buffer via `index_select(out=)`.
+
+`bench_throughput.py`, 8B, batch 1, 512 context, three repeats each:
+
+| | ms/token | tok/s |
+|---|---:|---:|
+| eager, scopes off | 19.44–19.49 | 51.3–51.4 |
+| **graphs, scopes off** | **18.99–19.11** | **52.3–52.7** |
+| eager, scopes on | 23.72 | 42.2 |
+| graphs, scopes on | 19.05 | 52.5 |
+
+As predicted, the gain is small (about 0.37 ms/token, +2%): with scopes off the loop was already GPU-bound, and graphs only remove per-launch overhead, not the dependency bubbles between back-to-back GEMVs. The bigger effect is robustness: with graphs, profiler scopes and host CPU speed stop mattering.
+
+`tests/test_cuda_graphs.py` checks graph replay against eager decode for 100 steps across KV block boundaries.
+
+Batch > 1 is excluded from that test because of a pre-existing bug on `main`: `swiglu_out` calls `.view(-1)` on the non-contiguous halves of the fused `gate_up` buffer. It needs fixing before larger batches are benchmarked.
+
 ## Files
 
 On this branch, in `docs/perf_history/`:

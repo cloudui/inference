@@ -26,6 +26,7 @@ Each commit was re-benchmarked against one frozen benchmark: median of 5 runs ×
 | 6 | **Fused RoPE + KV-cache write** | One kernel reads the fused QKV output, rotates q and k, and writes k/v straight into the cache. This replaces split/transpose, 2 RoPE launches and 2 copy kernels. | **+0.5 tok/s (+1.1%)** |
 | 7 | **Fused residual-add + RMSNorm** | Post-attention add+norm in one kernel, and the MLP residual add deferred into the next layer's input norm (cross-layer fusion). | **+0.4 tok/s** (two commits) |
 | 8 | **Flash-decode kernel polish** | Raw pointers instead of block pointers in the reduce kernel, running max/denominator instead of per-block log-sum-exp, `exp2` with a log2(e)-prescaled scale, fixed 16 KV splits, reversed grid order. | **+0.2 tok/s** at 512 context (these target long context) |
+| 9 | **CUDA graphs** (after this study) | Capture one decode step and replay it. The position moves into a GPU buffer the kernels read, the embedding writes into a static buffer, and warmup runs on a side stream so Triton autotuning finishes before capture. | **+1.0 tok/s (+2%)**, and throughput no longer depends on host CPU or profiler scopes (scopes on: 42.2 → 52.5) |
 
 ## Lessons worth a slide
 
