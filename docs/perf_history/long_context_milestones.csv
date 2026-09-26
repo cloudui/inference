@@ -1,0 +1,30 @@
+commit,change,cuda_graphs,context,median_tok_s,min_tok_s,max_tok_s,median_ms_per_tok
+8cea929,before flash-decode polish (after #7),False,512,51.14,51.12,51.16,19.554
+8cea929,before flash-decode polish (after #7),False,8192,47.18,47.18,47.18,21.194
+8cea929,before flash-decode polish (after #7),False,32768,36.77,36.77,36.78,27.193
+8cea929,before flash-decode polish (after #7),False,65536,27.92,27.91,27.92,35.822
+8cea929,before flash-decode polish (after #7),False,114688,20.56,20.56,20.56,48.647
+a496b35,reversed grid order,False,32768,35.77,35.76,35.79,27.957
+a496b35,reversed grid order,False,65536,27.38,27.38,27.38,36.525
+a496b35,reversed grid order,False,114688,20.29,20.29,20.29,49.282
+a861708,reduce kernel: raw pointers + running max/denominator,False,32768,39.05,39.05,39.06,25.608
+a861708,reduce kernel: raw pointers + running max/denominator,False,65536,31.54,31.54,31.54,31.709
+a861708,reduce kernel: raw pointers + running max/denominator,False,114688,24.49,24.49,24.49,40.828
+e9610a1,exp2/log2 with prescaled scale,False,32768,39.11,39.11,39.12,25.567
+e9610a1,exp2/log2 with prescaled scale,False,65536,31.54,31.54,31.54,31.703
+e9610a1,exp2/log2 with prescaled scale,False,114688,24.53,24.52,24.53,40.774
+9bd7daf,fixed 16 KV splits,False,512,51.22,51.19,51.25,19.523
+9bd7daf,fixed 16 KV splits,False,8192,48.12,48.11,48.12,20.783
+9bd7daf,fixed 16 KV splits,False,32768,40.43,40.43,40.43,24.732
+9bd7daf,fixed 16 KV splits,False,65536,33.44,33.43,33.44,29.908
+9bd7daf,fixed 16 KV splits,False,114688,26.53,26.53,26.53,37.694
+1f28138,"HEAD, eager",False,512,51.17,51.16,51.19,19.542
+1f28138,"HEAD, eager",False,8192,48.16,48.15,48.17,20.764
+1f28138,"HEAD, eager",False,32768,40.43,40.43,40.43,24.734
+1f28138,"HEAD, eager",False,65536,33.44,33.44,33.44,29.908
+1f28138,"HEAD, eager",False,114688,26.54,26.51,26.55,37.674
+1f28138,"HEAD, CUDA graphs",True,512,52.43,52.21,52.45,19.071
+1f28138,"HEAD, CUDA graphs",True,8192,49.34,49.29,49.34,20.269
+1f28138,"HEAD, CUDA graphs",True,32768,41.27,41.12,41.3,24.229
+1f28138,"HEAD, CUDA graphs",True,65536,33.91,33.9,33.97,29.491
+1f28138,"HEAD, CUDA graphs",True,114688,26.87,26.83,26.89,37.215

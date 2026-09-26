@@ -1,5 +1,7 @@
 # Long context: Llama 3.1 RoPE and decode from 512 to 112K tokens
 
+*Measured and written 2026-09-26. Later sections are dated in their headings. Last updated 2026-09-26.*
+
 Measured 2026-09-26 on the same RunPod RTX PRO 4500 Blackwell (32 GB, ~896 GB/s spec) as `REPORT.md`: torch 2.8.0+cu128, triton 3.4.0, transformers 5.17.0. Engine code at `a83a976` (`main`, CUDA graphs on), Llama 3.1 8B shape, random fp16 weights, batch 1.
 
 ![throughput vs context](long_context_throughput.png)
@@ -9,6 +11,8 @@ Measured 2026-09-26 on the same RunPod RTX PRO 4500 Blackwell (32 GB, ~896 GB/s 
 - **Our engine stays at 96–98% of the practical bandwidth ceiling from 512 to 112K tokens.** Throughput goes from 52.4 to 26.8 tok/s, and all of the drop is bytes: at 112K, the KV cache is half of the 30 GB read per token.
 - **The lead over Hugging Face grows from 1.09× to 2.18×.** At short context, HF's `torch.compile` + CUDA graphs is close behind. From 8K on, HF's fastest mode is plain eager with `DynamicCache`.
 - **HF's StaticCache modes collapse at long context:** 3.4–3.8 tok/s at 96K, and out of memory at 112K. A StaticCache always passes an attention mask, and in HF's SDPA path a mask turns off native GQA (so K/V get copied out 4× every step) and turns off the FlashAttention kernel.
+- **Optimization #8 (the flash-decode polish) is worth +29% at 112K,** after measuring +0.2% at 512. Most of it comes from the reduce-kernel rewrite (`a861708`, +21%), the rest from fixed KV splits (`9bd7daf`, +8%).
+- **Our flash-decode kernel matches PyTorch's FlashAttention** (SDPA with native GQA) at every length, kernel against kernel with L2 flushed. Both reach ~775 GB/s at 112K.
 - **Llama 3.1 RoPE only needed a new table, not a new kernel.** The 3.1 scaling changes each dimension pair's frequency once. Position isn't involved, so the fused RoPE kernel just reads different `cos`/`sin` rows.
 - **The largest context that fits is 112K.** Weights take ~15 GiB and the KV cache 128 KiB per token; 120K runs out of memory on the 32 GB card.
 
@@ -102,7 +106,54 @@ Preallocation isn't the problem; it saves allocator calls and is what makes `tor
 
 The HF baseline isn't misconfigured: `generate(cache_implementation="static")` takes the same path. HF `transformers` is a reference implementation built for breadth and correctness. Serving engines (vLLM, SGLang, TensorRT-LLM) use split-KV decode kernels, paged KV caches and CUDA graphs. At batch 1 in fp16 they should land near the same bandwidth ceiling as ours; they haven't been measured here.
 
-A caveat on the attention row: taken at face value, HF DynamicCache's FlashAttention time would mean reading KV at ~925 GB/s, above the 896 GB/s spec. The likely reason is that the `torch.cat` just before it leaves part of the new cache in L2. So "4.6 vs 5.4 ms" is not a clean kernel-vs-kernel comparison.
+A caveat on the attention row: taken at face value, HF DynamicCache's FlashAttention time would mean reading KV at ~925 GB/s, above the 896 GB/s spec. The `torch.cat` just before it leaves part of the new cache in L2. With L2 flushed, the two kernels run level (see "Flash-decode vs PyTorch's FlashAttention" below), so "4.6 vs 5.4 ms" says more about cache warmth than about the kernels.
+
+## Optimization #8 at long context (2026-09-26)
+
+![optimization #8 at long context](long_context_milestones.png)
+
+`OPTIMIZATIONS.md` credited the flash-decode polish (#8) with only +0.2 tok/s, because it was measured at 512 tokens, where attention is 2% of the bytes. This reruns the commits around it at long context. The method is the same as the original study (`REPORT.md`): each commit in its own worktree, profiler hooks stubbed, 3 warmup runs + 5 timed runs of 128 steps, median. It uses `harness/bench_ctx.py`, a copy of the study's `bench_fixed.py` that sizes `max_position_embeddings` and the KV cache to the run. All runs are eager, since the old commits predate CUDA graphs.
+
+tok/s (min–max spread across the 5 runs was ≤ 0.2 tok/s everywhere):
+
+| commit | change | 512 | 8K | 32K | 64K | 112K |
+|---|---|---:|---:|---:|---:|---:|
+| `8cea929` | before #8 (after the fused add + RMSNorm, #7) | 51.14 | 47.18 | 36.77 | 27.92 | 20.56 |
+| `a496b35` | reversed Triton grid order | | | 35.77 | 27.38 | 20.29 |
+| `a861708` | reduce kernel: raw pointers, running max/denominator instead of per-block log-sum-exp | | | 39.05 | 31.54 | 24.49 |
+| `e9610a1` | `exp2`/`log2` with a log2(e)-prescaled scale | | | 39.11 | 31.54 | 24.53 |
+| `9bd7daf` | fixed 16 KV splits, each looping over its KV blocks | 51.22 | 48.12 | 40.43 | 33.44 | 26.53 |
+| `1f28138` | HEAD, eager | 51.17 | 48.16 | 40.43 | 33.44 | 26.54 |
+| `1f28138` | HEAD, CUDA graphs | 52.43 | 49.34 | 41.27 | 33.91 | 26.87 |
+
+- **The whole bundle: +0.2% at 512, +2% at 8K, +10% at 32K, +20% at 64K, +29% at 112K.** At 112K it takes 11 ms off every token (48.6 → 37.7 ms). The KV read beyond the 512-token baseline goes from ~515 GB/s to ~825 GB/s.
+- **The reduce-kernel rewrite (`a861708`) is most of it: +21% at 112K.** Before `9bd7daf`, the generation kernel wrote one partial result per KV block, hundreds to thousands per head at 112K (448–3,584 depending on the autotuned block size), and the reduce kernel looped over all of them with a block pointer and a full log-sum-exp per block. Raw pointers and a running max/denominator made that loop much cheaper.
+- **Fixed splits (`9bd7daf`) add another +8%.** Sixteen splits per head each loop over their blocks inside one program, so the reduce kernel only combines 16 partial results however long the context. This is also what made CUDA graphs possible later (a fixed grid).
+- **The reversed grid order (`a496b35`) costs 1–3% at long context,** and `exp2` is neutral. Both are small beside the two changes above.
+- Nothing after `9bd7daf` touched attention: HEAD eager matches it to 0.01 tok/s. CUDA graphs save a near-constant 0.42–0.50 ms per token.
+
+Raw data: `long_context_milestones.csv`. Reproduce: `docs/perf_history/harness/sweep_milestones.sh` (about 30 minutes; creates worktrees under `harness/wt/`).
+
+## Flash-decode vs PyTorch's FlashAttention, kernel only (2026-09-26)
+
+One attention call (32 query heads, 8 KV heads, head_dim 128, batch 1), from `kernels/benchmarks/bench_decode_vs_sdpa.py`. It times with `triton.testing.do_bench`, which flushes L2 between runs. SDPA is called with `enable_gqa=True` and no mask, which selects PyTorch's FlashAttention kernel: the same path HF's DynamicCache mode takes. Tri Dao's `flash_attn` package isn't installed here and wasn't compared.
+
+| KV length | flash-decode (ms) | SDPA + GQA (ms) | flash-decode GB/s | SDPA GB/s |
+|---:|---:|---:|---:|---:|
+| 512 | 0.0124 | 0.0143 | 170 | 146 |
+| 2K | 0.0208 | 0.0248 | 403 | 339 |
+| 8K | 0.0547 | 0.0560 | 613 | 599 |
+| 16K | 0.0963 | 0.0999 | 697 | 672 |
+| 32K | 0.1823 | 0.1853 | 736 | 724 |
+| 64K | 0.3484 | 0.3560 | 771 | 754 |
+| 112K | 0.6065 | 0.6104 | 774 | 770 |
+| 128K | 0.6897 | 0.6906 | 778 | 777 |
+
+- **Ours is 15–19% faster up to 2K, 2–4% faster from 8K to 64K, and level from 112K up** (SDPA time ÷ ours). At long context both are limited by the same memory bandwidth.
+- **Short contexts are latency-bound, not bandwidth-bound:** 12 µs to read 2 MB. At 512 tokens attention is ~0.4 ms of a 19 ms token, so this doesn't show up end to end.
+- The benchmark now passes `seq_len` as a device tensor, like the model does. Before, a Python int added a host-to-device copy to every timed call.
+
+Raw data: `flash_decode_kernel.csv`.
 
 ## Caveats
 
@@ -113,6 +164,6 @@ A caveat on the attention row: taken at face value, HF DynamicCache's FlashAtten
 
 ## Next
 
-- Rerun the optimization milestones from `OPTIMIZATIONS.md` at long context. Flash-decode changes #1 and #8 were aimed at long context but only ever measured at 512.
-- Stronger baselines: HF with FlashAttention 2, and vLLM at batch 1.
+- vLLM at batch 1, as the production-engine baseline.
+- HF with `attn_implementation="flash_attention_2"` (needs the `flash-attn` package).
 - Beyond batch 1: batching (fix the `swiglu_out` batch > 1 bug first) and lower-precision weights and KV. Those move the ceiling itself.

@@ -1,5 +1,7 @@
 # Performance history — LLaMA-3 8B decode engine
 
+*Study measured 2026-09-25. Follow-up sections are dated in their headings. Last updated 2026-09-26.*
+
 Measured 2026-09-25 on a RunPod RTX PRO 4500 Blackwell (32 GB, ~896 GB/s spec), AMD EPYC 7663 host (shared, load avg ~6–8), torch 2.8.0+cu128, triton 3.4.0, transformers 5.17.0.
 Every commit that touches `model.py` or `kernels/` was checked out into its own `git worktree` and run against one frozen benchmark. `main` and the working tree were never modified during the measurements.
 
@@ -226,7 +228,7 @@ Also worth adding as a positive "ablation": **CUDA graphs** (capture one decode 
   - `a496b35` "+2.0, SM scheduling & L2 hit rate": 0.0 hooks-off
   - `d8008bc` "−1.44 initial overhead": −0.07 hooks-off
 
-## Profiler toggle (added after this study)
+## Profiler toggle (added after this study, 2026-09-26)
 
 `model.py` now gates its `record_function` scopes. They are **off by default**, and every scope is a shared no-op.
 
@@ -241,7 +243,7 @@ Checked with `bench_throughput.py` at HEAD: scopes off **51.6** tok/s, `--profil
 
 The numbers in this report were taken before the toggle existed. There, "hooks off" means the harness stubbed `torch.profiler.record_function`. For commits after the toggle, `harness/bench_fixed.py --hooks on` also sets `INFERENCE_PROFILE=1`, so both modes stay comparable across old and new commits.
 
-## Follow-up: CUDA graphs (branch `cuda-graphs`)
+## Follow-up: CUDA graphs (branch `cuda-graphs`, 2026-09-26)
 
 `model.enable_cuda_graphs()` (or `bench_throughput.py --cuda-graphs`) captures one decode step per (batch size, KV cache) and replays it.
 
@@ -265,9 +267,9 @@ As predicted, the gain is small (about 0.37 ms/token, +2%): with scopes off the 
 
 Batch > 1 is excluded from that test because of a pre-existing bug on `main`: `swiglu_out` calls `.view(-1)` on the non-contiguous halves of the fused `gate_up` buffer. It needs fixing before larger batches are benchmarked.
 
-## Follow-up: long context and Llama 3.1 RoPE
+## Follow-up: long context and Llama 3.1 RoPE (2026-09-26)
 
-See `LONG_CONTEXT.md`: Llama 3.1 RoPE scaling, a sweep from 512 to 112K tokens against three HF modes, and why HF's StaticCache path collapses at long context. Short version: the engine stays at 96–98% of the practical bandwidth ceiling at every length and reaches 2.2× HF's best at 112K.
+See `LONG_CONTEXT.md`: Llama 3.1 RoPE scaling, a sweep from 512 to 112K tokens against three HF modes, and why HF's StaticCache path collapses at long context. Short version: the engine stays at 96–98% of the practical bandwidth ceiling at every length and reaches 2.2× HF's best at 112K. The flash-decode polish (#8), measured at +0.2% here, is worth +29% at 112K.
 
 ## Files
 
@@ -277,7 +279,8 @@ On this branch, in `docs/perf_history/`:
 - `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
 - `performance_history.csv`: one row per benchmarked commit (42), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
 - `throughput_history.png`: the chart above.
-- `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, three charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
+- `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, `long_context_milestones.csv` (optimization #8 at long context), `flash_decode_kernel.csv`, four charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
+- `harness/`: `bench_ctx.py` and `sweep_milestones.sh`, the long-context milestone harness.
 
 On branch `perf-history-sweep`:
 

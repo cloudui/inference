@@ -1,5 +1,7 @@
 # From 42 to 51 tok/s: optimizing a Triton LLaMA-3 8B decode engine
 
+*Measured 2026-09-25; CUDA graphs and long-context results added 2026-09-26. Last updated 2026-09-26.*
+
 **Setup.** Batch 1, fp16, 512-token context, RTX PRO 4500 Blackwell (~896 GB/s).
 Each commit was re-benchmarked against one frozen benchmark: median of 5 runs × 128 decode steps, after 3 warmup runs.
 
@@ -25,15 +27,16 @@ Each commit was re-benchmarked against one frozen benchmark: median of 5 runs ×
 | 5 | **Preallocated buffers, `out=` kernels** | No `torch.zeros`/`empty` per step. Every kernel writes into a buffer allocated once, which also removes three memsets per layer inside flash-decode. | **+0.7 tok/s (+1.6%)** |
 | 6 | **Fused RoPE + KV-cache write** | One kernel reads the fused QKV output, rotates q and k, and writes k/v straight into the cache. This replaces split/transpose, 2 RoPE launches and 2 copy kernels. | **+0.5 tok/s (+1.1%)** |
 | 7 | **Fused residual-add + RMSNorm** | Post-attention add+norm in one kernel, and the MLP residual add deferred into the next layer's input norm (cross-layer fusion). | **+0.4 tok/s** (two commits) |
-| 8 | **Flash-decode kernel polish** | Raw pointers instead of block pointers in the reduce kernel, running max/denominator instead of per-block log-sum-exp, `exp2` with a log2(e)-prescaled scale, fixed 16 KV splits, reversed grid order. | **+0.2 tok/s** at 512 context (these target long context) |
-| 9 | **CUDA graphs** (after this study) | Capture one decode step and replay it. The position moves into a GPU buffer the kernels read, the embedding writes into a static buffer, and warmup runs on a side stream so Triton autotuning finishes before capture. | **+1.0 tok/s (+2%)**, and throughput no longer depends on host CPU or profiler scopes (scopes on: 42.2 → 52.5) |
+| 8 | **Flash-decode kernel polish** | Raw pointers instead of block pointers in the reduce kernel, running max/denominator instead of per-block log-sum-exp, `exp2` with a log2(e)-prescaled scale, fixed 16 KV splits, reversed grid order. | **+0.2 tok/s** at 512 context; **+29% at 112K** (20.6 → 26.5 tok/s), mostly from the reduce-kernel rewrite |
+| 9 | **CUDA graphs** (after this study, 2026-09-26) | Capture one decode step and replay it. The position moves into a GPU buffer the kernels read, the embedding writes into a static buffer, and warmup runs on a side stream so Triton autotuning finishes before capture. | **+1.0 tok/s (+2%)**, and throughput no longer depends on host CPU or profiler scopes (scopes on: 42.2 → 52.5) |
 
-## Long context (Llama 3.1, up to 112K tokens)
+## Long context (Llama 3.1, up to 112K tokens) — 2026-09-26
 
 ![throughput vs context](long_context_throughput.png)
 
 - **Still bandwidth-bound: 96–98% of the practical ceiling from 512 to 112K tokens** (52.4 → 26.8 tok/s). The drop is all bytes: at 112K the KV cache is half of what each token reads.
 - **2.2× faster than HF's best at 112K** (1.09× at 512). HF's StaticCache path, compiled or not, collapses: with a mask, SDPA turns off native GQA and FlashAttention, so `repeat_kv` copies the cache 4× per step and a non-split kernel walks it.
+- **Optimization #8 was measured in the wrong place.** +0.2% at 512 tokens, +29% at 112K: attention is 2% of the bytes at 512 and half of them at 112K.
 - **Llama 3.1 RoPE was a table change, not a kernel change**, because the scaling is per frequency, not per position.
 
 Details: `LONG_CONTEXT.md`.
@@ -44,6 +47,7 @@ Details: `LONG_CONTEXT.md`.
 - **A CPU-bound benchmark can hide a GPU win.** Change #3 looked like a 4% regression with the hooks on, because the extra `.T` views cost CPU time. With CPU overhead out of the way, it's the second-biggest GPU improvement.
 - **A fixed benchmark can hide the biggest bug.** Replaying the same positions warms Triton's autotune cache, so change #1 shows as "+0" in a commit-by-commit sweep while being a 20× fix in real generation. Benchmark with fresh positions too.
 - **Check your reference too.** `model.to(torch.float16)` also casts HF's RoPE frequencies to fp16, and the error grows with position: by 20K tokens that "reference" is off by radians. Our engine first looked 20% wrong at long context; the bug was in the test setup.
+- **Benchmark where the change is aimed.** The flash-decode polish looked like noise at 512 tokens and turned out to be the largest long-context win.
 - **Know your ceiling.** At the end, the GEMVs alone take 18.7 of the 19.5 ms per token. What's left is GEMV bandwidth efficiency and lower-precision weights, not more fusion.
 
 *Method:* each commit ran in its own `git worktree` against the same benchmark script, with profiler hooks stubbed out for the main numbers. Full per-commit data: `REPORT.md`, `performance_history.csv`.

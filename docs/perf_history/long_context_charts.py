@@ -1,5 +1,6 @@
 """
-Charts for LONG_CONTEXT.md, from long_context_sweep.csv and long_context_breakdown_32k.csv.
+Charts for LONG_CONTEXT.md, from long_context_sweep.csv, long_context_breakdown_32k.csv and
+long_context_milestones.csv.
 
     pip install matplotlib
     python docs/perf_history/long_context_charts.py
@@ -189,9 +190,47 @@ def chart_breakdown():
     plt.close(fig)
 
 
+def chart_milestones():
+    """Optimization #8 (flash-decode polish), commit by commit, at long context."""
+    rows = [r for r in csv.DictReader(open(HERE / "long_context_milestones.csv")) if r["cuda_graphs"] == "False"]
+    chain = [("8cea929", "8cea929  before #8"), ("a496b35", "a496b35  reversed grid order"),
+             ("a861708", "a861708  reduce kernel rewrite"), ("e9610a1", "e9610a1  exp2 / log2"),
+             ("9bd7daf", "9bd7daf  fixed 16 KV splits")]
+    # ordered stages: one blue ramp, light -> dark
+    ramp = ["#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#104281"]
+    ctxs = [32768, 65536, 114688]
+    val = {(r["commit"], int(r["context"])): float(r["median_tok_s"]) for r in rows}
+
+    fig, ax = _axes((11, 5.4))
+    ax.grid(axis="y", color=GRID, lw=1)
+    width = 0.16
+    for i, ((c, label), color) in enumerate(zip(chain, ramp)):
+        xs = [j + (i - 2) * width for j in range(len(ctxs))]
+        ys = [val[c, ctx] for ctx in ctxs]
+        ax.bar(xs, ys, width=width, color=color, edgecolor=SURF, lw=1.5, label=label, zorder=2)
+        for x, y in zip(xs, ys):
+            ax.text(x, y + 0.5, f"{y:.1f}", ha="center", va="bottom", fontsize=7.5, color=INK2)
+    for j, ctx in enumerate(ctxs):
+        before, after = val["8cea929", ctx], val["9bd7daf", ctx]
+        ax.text(j, max(before, after) + 4.2, f"+{after / before - 1:.0%}", ha="center", fontsize=11,
+                color=INK, fontweight="bold")
+
+    ax.set_xticks(range(len(ctxs)), [f"{_ctx_label(c)} context" for c in ctxs])
+    ax.tick_params(axis="x", length=0)
+    ax.set_ylim(0, 50)
+    ax.set_ylabel("Decode throughput (tok/s), eager")
+    ax.set_title("Optimization #8 at long context: +0.2% at 512 tokens, +29% at 112K",
+                 loc="left", color=INK, fontsize=12, pad=12)
+    ax.legend(loc="upper right", frameon=False, fontsize=9, labelcolor=INK)
+    fig.tight_layout()
+    fig.savefig(HERE / "long_context_milestones.png", facecolor=SURF)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     s = load_sweep()
     chart_throughput(s)
     chart_bytes(s)
     chart_breakdown()
-    print("wrote long_context_throughput.png, long_context_bytes.png, long_context_breakdown_32k.png")
+    chart_milestones()
+    print("wrote long_context_{throughput,bytes,breakdown_32k,milestones}.png")
