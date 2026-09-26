@@ -7,7 +7,7 @@ Every commit that touches `model.py` or `kernels/` was checked out into its own 
 
 ## TL;DR
 
-- **The first working engine (`e911b4f`) runs at 42.3 tok/s, and HEAD runs at 51.2 tok/s (+21%).** That is 92% of this card's weight-streaming ceiling: 16.06 GB of fp16 weights at 896 GB/s is about 55.8 tok/s.
+- **The first working engine (`e911b4f`) runs at 42.3 tok/s, and HEAD runs at 51.2 tok/s (+21%).** That is 86% of this card's spec weight-streaming ceiling (~59.4 tok/s) and ~94% of a practical one (~54.4 tok/s). Each token streams 15.01 GB of fp16 weights (every layer plus `lm_head`; the embedding table is only read one row at a time) plus ~75 MB of KV cache. The spec ceiling uses 896 GB/s; the practical one uses the ~820 GB/s the best isolated GEMVs reach.
 - **The "29 → 49 tok/s" story is mostly profiler overhead.** `95a4e01` wrapped every op in `torch.profiler.record_function` (483 scopes per decode step, still 387 at HEAD). These scopes cost CPU time even when no profiler is running. The loop has no CUDA graphs and is CPU-bound, so that cost lands directly on tok/s.
   - As committed, the history reads **27.4 → 45.2 tok/s**, which matches your THROUGHPUT_LOG.
   - With the hooks stubbed out it reads **42.3 → 51.2**.
@@ -188,7 +188,7 @@ With hooks on the two norm fusions were much larger (+1.6 and +2.9), again becau
 
 19.53 ms/token total, of which the isolated GEMVs (32 layers + lm_head) account for 18.69 ms at 785–823 GB/s. Everything else (attention, norms, RoPE, SwiGLU, launch gaps) is about 0.8 ms.
 
-- **At this context,** the remaining headroom is GEMV bandwidth efficiency (about 92% of spec now) and then lower-precision weights.
+- **At this context,** the remaining headroom is GEMV bandwidth efficiency (the GEMVs run at 785–823 GB/s, 88–92% of spec) and then lower-precision weights.
 - **With hooks on,** CUDA graphs would remove the CPU dependence entirely.
 
 ## Ablation plan for HEAD

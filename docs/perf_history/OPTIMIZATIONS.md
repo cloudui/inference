@@ -3,14 +3,14 @@
 **Setup.** Batch 1, fp16, 512-token context, RTX PRO 4500 Blackwell (~896 GB/s).
 Each commit was re-benchmarked against one frozen benchmark: median of 5 runs × 128 decode steps, after 3 warmup runs.
 
-**Ceiling.** Batch-1 decode streams all 16.06 GB of weights for every token, so the hard limit here is about **55.8 tok/s**.
+**Ceiling.** Batch-1 decode streams 15.01 GB of fp16 weights per token (every layer plus `lm_head`; the embedding is just a row lookup). At the 896 GB/s spec that caps out at about **59.4 tok/s**. At the ~820 GB/s a well-tuned GEMV actually reaches, it's about **54.4 tok/s**.
 
-| | tok/s | % of bandwidth ceiling |
-|---|---:|---:|
-| First working engine | 42.3 | 76% |
-| **Final** | **51.2** | **92%** |
-| HF eager (SDPA) | 44.8 | 80% |
-| HF `torch.compile` + CUDA graphs | 48.2 | 86% |
+| | tok/s | % of spec ceiling | % of practical ceiling |
+|---|---:|---:|---:|
+| First working engine | 42.3 | 71% | 78% |
+| **Final** | **51.2** | **86%** | **94%** |
+| HF eager (SDPA) | 44.8 | 75% | 82% |
+| HF `torch.compile` + CUDA graphs | 48.2 | 81% | 89% |
 
 ![throughput history](throughput_history.png)
 
