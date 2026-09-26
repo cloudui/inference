@@ -9,6 +9,7 @@ Measured 2026-09-26 on the same RunPod RTX PRO 4500 Blackwell (32 GB, ~896 GB/s 
 ## TL;DR
 
 - **Our engine stays at 96–98% of the practical bandwidth ceiling from 512 to 112K tokens.** Throughput goes from 52.4 to 26.8 tok/s, and all of the drop is bytes: at 112K, the KV cache is half of the 30 GB read per token.
+- **vLLM 0.30 and our engine are level within 1% at every length** (512 to 111K), timed the same way: host wall clock per step, with the token read back each step. vLLM is 0.3% ahead at 512; we're up to 1% ahead from 64K on.
 - **The lead over Hugging Face grows from 1.09× to 2.18×.** At short context, HF's `torch.compile` + CUDA graphs is close behind. From 8K on, HF's fastest mode is plain eager with `DynamicCache`.
 - **HF's StaticCache modes collapse at long context:** 3.4–3.8 tok/s at 96K, and out of memory at 112K. A StaticCache always passes an attention mask, and in HF's SDPA path a mask turns off native GQA (so K/V get copied out 4× every step) and turns off the FlashAttention kernel.
 - **Optimization #8 (the flash-decode polish) is worth +29% at 112K,** after measuring +0.2% at 512. Most of it comes from the reduce-kernel rewrite (`a861708`, +21%), the rest from fixed KV splits (`9bd7daf`, +8%).
@@ -153,7 +154,42 @@ One attention call (32 query heads, 8 KV heads, head_dim 128, batch 1), from `ke
 - **Short contexts are latency-bound, not bandwidth-bound:** 12 µs to read 2 MB. At 512 tokens attention is ~0.4 ms of a 19 ms token, so this doesn't show up end to end.
 - The benchmark now passes `seq_len` as a device tensor, like the model does. Before, a Python int added a host-to-device copy to every timed call.
 
+**Split count.** `kernels/benchmarks/bench_decode_splits.py` sweeps the fixed number of KV splits (4 to 128). The generation kernel's time barely changes. The reduce kernel's time grows with the split count (4.3 µs at 4 splits, 7 µs at 16, 21 µs at 128). 8 splits is best at every length, but it saves only 2–4 µs per call over the current 16 (nothing at 128K): about 0.1 ms per token, roughly 0.5%. A length-dependent split count isn't worth it, since CUDA graphs need a fixed grid anyway. (This benchmark had been broken since the CUDA-graphs change, which made the kernels read `seq_len` from a device tensor; now fixed.)
+
 Raw data: `flash_decode_kernel.csv`.
+
+## vLLM comparison (2026-09-26)
+
+![ours vs vLLM](long_context_vllm.png)
+
+vLLM 0.30.0 (torch 2.13, CUDA 13.0), Llama 3.1 8B config with random weights (`load_format="dummy"`), batch 1, its defaults otherwise: FlashAttention 2 backend, paged KV cache, `torch.compile`, CUDA graphs. Measured with `benchmarks/bench_throughput_vllm.py`.
+
+**How it's timed.** vLLM can't be given a pre-filled KV cache, so each request sends a `seq_len`-token random prompt and vLLM prefills it for real (prefix caching off, so every request attends over its own context). The script drives the engine one `step()` at a time and averages only the decode steps after 30 warmup tokens: host wall clock per step, including sampling and returning the token. It takes the median of 3 requests after one discarded warmup request; the three agreed within 0.02 ms everywhere.
+
+That's not how `bench_throughput.py` times our engine. It uses CUDA events around 128 steps and never reads a token back, so the CPU can queue the next step while the GPU runs. For a like-for-like number, our engine was also run as a real generation loop (forward pass, greedy argmax, `.item()` to the host, feed the token back) and timed the same way.
+
+| context | ours, `bench_throughput.py` | ours, generation loop | vLLM | ours vs vLLM (loop vs vLLM) |
+|---:|---:|---:|---:|---:|
+| 512 | 19.07 ms (52.4 tok/s) | 19.24 ms (52.0) | 19.19 ms (52.1) | −0.3% |
+| 2K | 19.38 (51.6) | 19.48 (51.3) | 19.50 (51.3) | +0.1% |
+| 8K | 20.25 (49.4) | 20.44 (48.9) | 20.47 (48.9) | +0.2% |
+| 16K | 21.60 (46.3) | 21.79 (45.9) | 21.80 (45.9) | +0.1% |
+| 32K | 24.20 (41.3) | 24.40 (41.0) | 24.48 (40.9) | +0.3% |
+| 64K | 29.40 (34.0) | 29.58 (33.8) | 29.88 (33.5) | +1.0% |
+| 96K | 34.58 (28.9) | 34.80 (28.7) | 35.11 (28.5) | +0.9% |
+| 111K | 37.02 (27.0) | 37.22 (26.9) | 37.48 (26.7) | +0.7% |
+
+- **Level within 1% everywhere.** At batch 1 in fp16 both engines are limited by the same bytes, so this is the expected result. The engine is now as fast as the production baseline, not just faster than HF.
+- **Reading the token back costs ~0.2 ms per step** (the gap between our two columns). A server pays that too.
+- **From 64K on we're up to 1% ahead,** plausibly vLLM's paged-KV indirection: its kernel looks up a block table, while ours reads one contiguous cache. At 512 vLLM is 0.05 ms faster; that wasn't profiled, but at that size a step's host-side overhead is the likeliest difference.
+- **vLLM's longest context here was 111K (113,664 tokens), not 112K.** At `gpu_memory_utilization=0.99` it keeps ~2 GiB for activations and workspaces and can fit 114,256 KV tokens, so 114,688 plus the decode tokens didn't fit. Our engine reserves nothing for batched prefill, so it fits the full 112K. Our 111K numbers were measured separately for this table.
+- Raw data: `vllm_comparison.csv`, and the run log (note `ctx-sweep vllm-v1`, `impl=vllm`).
+
+**Setup notes (vLLM 0.30 on this RTX PRO 4500):**
+- It needs its own virtualenv (it pins torch 2.13 / CUDA 13). The install is ~8 GB, so it went on the pod's root disk (`/opt/venvs/vllm`), not the `/workspace` volume. Run it with `benchmarks/sweep_context.py --runs vllm:default`, which uses `/opt/venvs/vllm/bin/python` (change with `--vllm-python`).
+- **FlashInfer's sampling module fails to JIT on sm_120** ("requires sm75 or higher": its architecture check finds no target architectures). The bench sets `VLLM_USE_FLASHINFER_SAMPLER=0`, and greedy sampling runs on vLLM's PyTorch sampler.
+- **A prefill chunk (`max_num_batched_tokens`) larger than `max_model_len` crashes engine startup** with an illegal memory access. The bench caps the chunk at the model length.
+- Each cell starts a fresh engine (~20 s `torch.compile`, CUDA-graph capture cached after the first run) and prefills every request, so a sweep takes about 30 minutes, mostly prefill at long context.
 
 ## Caveats
 
@@ -164,6 +200,7 @@ Raw data: `flash_decode_kernel.csv`.
 
 ## Next
 
-- vLLM at batch 1, as the production-engine baseline.
+- Beyond batch 1, where serving engines earn their keep: batched decode (fix the `swiglu_out` batch > 1 bug first), then compare against vLLM with continuous batching.
+- Lower-precision weights and KV (FP8/INT4), which move the bandwidth ceiling itself.
 - HF with `attn_implementation="flash_attention_2"` (needs the `flash-attn` package).
 - Beyond batch 1: batching (fix the `swiglu_out` batch > 1 bug first) and lower-precision weights and KV. Those move the ceiling itself.

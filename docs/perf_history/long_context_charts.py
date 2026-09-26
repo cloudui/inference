@@ -1,6 +1,6 @@
 """
 Charts for LONG_CONTEXT.md, from long_context_sweep.csv, long_context_breakdown_32k.csv and
-long_context_milestones.csv.
+long_context_milestones.csv and vllm_comparison.csv.
 
     pip install matplotlib
     python docs/perf_history/long_context_charts.py
@@ -227,10 +227,40 @@ def chart_milestones():
     plt.close(fig)
 
 
+def chart_vllm():
+    """Ours vs vLLM, both timed per step on the host with the token read back each step."""
+    rows = list(csv.DictReader(open(HERE / "vllm_comparison.csv")))
+    ctxs = [int(r["context"]) for r in rows]
+    ours = [1e3 / float(r["ours_generation_loop_ms"]) for r in rows]
+    vllm = [1e3 / float(r["vllm_ms"]) for r in rows]
+
+    fig, ax = _axes((11, 5.4))
+    ax.grid(axis="y", color=GRID, lw=1)
+    x = range(len(ctxs))
+    w = 0.36
+    ax.bar([i - w / 2 for i in x], ours, width=w, color=BLUE, edgecolor=SURF, lw=1.5, label="Ours (Triton + CUDA graphs)", zorder=2)
+    ax.bar([i + w / 2 for i in x], vllm, width=w, color=GRAY, edgecolor=SURF, lw=1.5, label="vLLM 0.30 (FlashAttention 2, CUDA graphs)", zorder=2)
+    for i, (o, v) in enumerate(zip(ours, vllm)):
+        ax.text(i, max(o, v) + 1.0, f"{o / v - 1:+.1%}", ha="center", fontsize=9, color=INK)
+
+    ax.set_xticks(list(x), [_ctx_label(c) for c in ctxs])
+    ax.tick_params(axis="x", length=0)
+    ax.set_ylim(0, 62)
+    ax.set_xlabel("Context length")
+    ax.set_ylabel("Decode throughput (tok/s)")
+    ax.set_title("Ours vs vLLM at batch 1: level within 1% at every length  (labels: ours vs vLLM)",
+                 loc="left", color=INK, fontsize=12, pad=12)
+    ax.legend(loc="upper right", frameon=False, fontsize=9, labelcolor=INK)
+    fig.tight_layout()
+    fig.savefig(HERE / "long_context_vllm.png", facecolor=SURF)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     s = load_sweep()
     chart_throughput(s)
     chart_bytes(s)
     chart_breakdown()
     chart_milestones()
-    print("wrote long_context_{throughput,bytes,breakdown_32k,milestones}.png")
+    chart_vllm()
+    print("wrote long_context_{throughput,bytes,breakdown_32k,milestones,vllm}.png")

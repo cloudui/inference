@@ -269,7 +269,7 @@ Batch > 1 is excluded from that test because of a pre-existing bug on `main`: `s
 
 ## Follow-up: long context and Llama 3.1 RoPE (2026-09-26)
 
-See `LONG_CONTEXT.md`: Llama 3.1 RoPE scaling, a sweep from 512 to 112K tokens against three HF modes, and why HF's StaticCache path collapses at long context. Short version: the engine stays at 96–98% of the practical bandwidth ceiling at every length and reaches 2.2× HF's best at 112K. The flash-decode polish (#8), measured at +0.2% here, is worth +29% at 112K.
+See `LONG_CONTEXT.md`: Llama 3.1 RoPE scaling, a sweep from 512 to 112K tokens against three HF modes, and why HF's StaticCache path collapses at long context. Short version: the engine stays at 96–98% of the practical bandwidth ceiling at every length and reaches 2.2× HF's best at 112K. The flash-decode polish (#8), measured at +0.2% here, is worth +29% at 112K. Against vLLM 0.30 the engine is level within 1% at every length.
 
 ## Files
 
@@ -279,7 +279,7 @@ On this branch, in `docs/perf_history/`:
 - `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
 - `performance_history.csv`: one row per benchmarked commit (42), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
 - `throughput_history.png`: the chart above.
-- `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, `long_context_milestones.csv` (optimization #8 at long context), `flash_decode_kernel.csv`, four charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
+- `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, `long_context_milestones.csv` (optimization #8 at long context), `flash_decode_kernel.csv`, `vllm_comparison.csv`, five charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
 - `harness/`: `bench_ctx.py` and `sweep_milestones.sh`, the long-context milestone harness.
 
 On branch `perf-history-sweep`:

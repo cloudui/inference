@@ -35,6 +35,7 @@ Each commit was re-benchmarked against one frozen benchmark: median of 5 runs ×
 ![throughput vs context](long_context_throughput.png)
 
 - **Still bandwidth-bound: 96–98% of the practical ceiling from 512 to 112K tokens** (52.4 → 26.8 tok/s). The drop is all bytes: at 112K the KV cache is half of what each token reads.
+- **Level with vLLM 0.30** within 1% at every length from 512 to 111K, timed the same way.
 - **2.2× faster than HF's best at 112K** (1.09× at 512). HF's StaticCache path, compiled or not, collapses: with a mask, SDPA turns off native GQA and FlashAttention, so `repeat_kv` copies the cache 4× per step and a non-split kernel walks it.
 - **Optimization #8 was measured in the wrong place.** +0.2% at 512 tokens, +29% at 112K: attention is 2% of the bytes at 512 and half of them at 112K.
 - **Llama 3.1 RoPE was a table change, not a kernel change**, because the scaling is per frequency, not per position.
