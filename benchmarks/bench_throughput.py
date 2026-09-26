@@ -70,7 +70,9 @@ def log_run(args, tok_per_sec, per_step_ms):
     row = {
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
         "commit": _git("rev-parse", "--short", "HEAD"),
-        "dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
+        # the run log itself doesn't count, or every run after the first would look dirty
+        "dirty": bool(_git("status", "--porcelain", "--untracked-files=no", "--",
+                           ":(top)", ":(top,exclude)benchmarks/results")),
         "model": "tiny" if args.small else "llama3-8b",
         "seq_len": args.seq_len,
         "decode_steps": args.decode_steps,
