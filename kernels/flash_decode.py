@@ -20,7 +20,7 @@ def flash_decode_generation_kernel(
     v_ptr,
     mid_o_ptr,
     mid_lse_ptr,
-    seq_len,
+    seq_len_ptr,  # 1-element int32 device tensor: valid KV rows (read on GPU for CUDA graphs)
     scale,
     head_dim,
     stride_q_batch,
@@ -48,6 +48,8 @@ def flash_decode_generation_kernel(
     pid_kv = tl.program_id(axis=0)     # Index of the KV split
     pid_head = tl.program_id(axis=1)   # Index of the KV head
     pid_batch = tl.program_id(axis=2)  # Index of the Batch
+
+    seq_len = tl.load(seq_len_ptr)
 
     # Calculate block indexing range for this split
     total_blocks = tl.cdiv(seq_len, BLOCK_SEQ_KV)
@@ -242,13 +244,18 @@ def flash_decode_reduce_kernel(
 LOG2_E = 1.4426950408889634
 
 def flash_decode_out(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int | torch.Tensor,
     mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor,
     num_splits: int = 16
 ) -> None:
     """Computes Grouped-Query Attention (GQA) using a Split-KV flash decoding approach.
     Uses pre-allocated intermediate tensors (mid_o, mid_lse) and output tensor (out).
+
+    seq_len may be a Python int or a 1-element int32 device tensor. The grid is fixed at
+    num_splits and seq_len is read on the GPU, so the launch is CUDA-graph replayable.
     """
+    if not isinstance(seq_len, torch.Tensor):
+        seq_len = torch.tensor([seq_len], dtype=torch.int32, device=q.device)
     batch_size = q.shape[0]
     q_heads = q.shape[1]
     _, k_heads, _, head_dim = k.shape
@@ -322,7 +329,7 @@ def flash_decode_out(
 
 
 def flash_decode(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int,
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int | torch.Tensor,
     num_splits: int = 16
 ) -> torch.Tensor:
     batch_size = q.shape[0]

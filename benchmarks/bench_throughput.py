@@ -37,6 +37,8 @@ def parse_args():
     p.add_argument("--profile-scopes", action="store_true",
                    help="Keep torch.profiler record_function scopes on (costs CPU time; "
                         "also enabled by INFERENCE_PROFILE=1)")
+    p.add_argument("--cuda-graphs",  action="store_true",
+                   help="Replay decode steps from a captured CUDA graph (model.enable_cuda_graphs())")
     p.add_argument("--no-log",       action="store_true",
                    help="Don't append this run to benchmarks/results/throughput_runs.csv")
     p.add_argument("--note",         type=str, default="",
@@ -77,6 +79,7 @@ def log_run(args, tok_per_sec, per_step_ms):
         "warmup": args.warmup,
         "batch_size": args.batch_size,
         "profiler_scopes": profiling_enabled(),
+        "cuda_graphs": args.cuda_graphs,
         "tok_s": round(tok_per_sec, 2),
         "ms_per_tok": round(per_step_ms, 3),
         "gpu": torch.cuda.get_device_name(),
@@ -87,12 +90,19 @@ def log_run(args, tok_per_sec, per_step_ms):
         "note": args.note,
     }
     RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not RUN_LOG.exists()
-    with open(RUN_LOG, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(row))
-        if new_file:
-            w.writeheader()
-        w.writerow(row)
+    rows, fields = [], list(row)
+    if RUN_LOG.exists():
+        with open(RUN_LOG, newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            old_fields = reader.fieldnames or []
+        # keep old column order, append any new columns (old rows get them empty)
+        fields = old_fields + [k for k in row if k not in old_fields]
+    rows.append(row)
+    with open(RUN_LOG, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
     print(f"  Logged to {RUN_LOG.relative_to(RUN_LOG.parents[2])}")
 
 
@@ -149,10 +159,12 @@ def main():
     print(f"\n{'='*60}")
     print(f"  Decode Throughput Benchmark")
     print(f"  seq_len={args.seq_len}  decode_steps={args.decode_steps}  batch={args.batch_size}")
-    print(f"  profiler scopes={'on' if profiling_enabled() else 'off'}")
+    print(f"  profiler scopes={'on' if profiling_enabled() else 'off'}  cuda_graphs={'on' if args.cuda_graphs else 'off'}")
     print(f"{'='*60}\n")
 
     model, kv_caches, cfg = build_model(args)
+    if args.cuda_graphs:
+        model.enable_cuda_graphs()  # first warmup step captures the graph
 
     # Pre-fill KV cache with random data to simulate prior context
     if args.seq_len > 0:

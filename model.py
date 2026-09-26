@@ -223,10 +223,16 @@ class Attention:
         x: torch.Tensor,
         rope_embeds: tuple[torch.Tensor, torch.Tensor],
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
-        cache_position: int = 0,
+        cache_position: int | torch.Tensor = 0,
         out: torch.Tensor | None = None,
+        seq_len: int | torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """cache_position / seq_len: Python ints, or 1-element int32 device tensors (the form
+        Llama.forward uses, so a captured CUDA graph can replay at any position)."""
         cos, sin = rope_embeds
+        if seq_len is None:
+            assert not isinstance(cache_position, torch.Tensor), "pass seq_len with a tensor cache_position"
+            seq_len = cache_position + 1
 
         if self.buffer_pool is None or self.buffer_pool.qkv_proj_out is None:
             self.preallocate_buffers(x.shape[0], x.device, x.dtype, max_seq_len=self.max_position_embeddings)
@@ -251,7 +257,7 @@ class Attention:
                 self.buffer_pool.q, 
                 K, 
                 V, 
-                cache_position + 1,
+                seq_len,
                 self.buffer_pool.mid_o, 
                 self.buffer_pool.mid_lse, 
                 self.buffer_pool.fd_out
@@ -353,7 +359,8 @@ class DecoderLayer:
         mlp_out: torch.Tensor | None = None,
         rope_embeds: tuple[torch.Tensor, torch.Tensor] = None,
         kv_cache: tuple[torch.Tensor, torch.Tensor] | None = None,
-        cache_position: int = 0,
+        cache_position: int | torch.Tensor = 0,
+        seq_len: int | torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -372,7 +379,7 @@ class DecoderLayer:
                 residual, normed = self.input_layernorm(mlp_out, residual, out=self.buffer_pool.h_ping)
 
         with record_function("attn"):
-            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong)
+            attn_out = self.self_attn(normed, rope_embeds, kv_cache, cache_position, out=self.buffer_pool.h_pong, seq_len=seq_len)
         with record_function("attn_residual_post_norm"):
             residual, normed2 = self.post_attention_layernorm(attn_out, residual, out=self.buffer_pool.h_ping)
         with record_function("mlp"):
@@ -416,6 +423,10 @@ class Llama:
         for layer in self.layers:
             layer.set_buffer_pool(self.buffer_pool)
 
+        # CUDA graphs: one captured decode step per (batch size, KV cache), see enable_cuda_graphs()
+        self.use_cuda_graphs = False
+        self._graphs: dict[tuple, tuple[torch.Tensor, torch.cuda.CUDAGraph]] = {}
+
     # ── KV Cache ──────────────────────────────────────────────────────────
 
     def allocate_kv_cache(
@@ -446,7 +457,25 @@ class Llama:
     def preallocate_buffers(self, batch_size: int, device: torch.device = torch.device("cuda"), dtype: torch.dtype = torch.float16):
         self.norm_out = torch.empty(batch_size, 1, self.norm.weight.shape[0], device=device, dtype=dtype)
         self.lm_head_out = torch.empty(batch_size, 1, self.lm_head.shape[0], device=device, dtype=dtype)
+        self.embed_out = torch.empty(batch_size, 1, self.config.hidden_size, device=device, dtype=dtype)
+        # [cache_position, seq_len] on the GPU so kernels read them at run time (graph-replayable)
+        self.decode_pos = torch.zeros(2, device=device, dtype=torch.int32)
+        self._decode_pos_offsets = torch.tensor([0, 1], device=device, dtype=torch.int32)
+        self._cache_pos_view = self.decode_pos[0:1]
+        self._seq_len_view = self.decode_pos[1:2]
         self.buffer_pool.preallocate(self.config, batch_size, device, dtype)
+        self._graphs.clear()
+
+    def enable_cuda_graphs(self, enabled: bool = True) -> None:
+        """Replay decode steps from captured CUDA graphs.
+
+        The first decode for each (batch size, KV cache) warms up and captures a graph; every
+        later step only updates the token/position buffers and replays it, so per-step CPU
+        cost is ~constant and host speed / profiler scopes stop affecting throughput.
+        Captured steps don't emit per-op record_function scopes; disable for detailed profiling.
+        """
+        self.use_cuda_graphs = enabled
+        self._graphs.clear()
 
     @torch.inference_mode()
     def forward(
@@ -455,21 +484,35 @@ class Llama:
         start_pos: int = 0,
         kv_caches: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
     ) -> torch.Tensor:
-        """Run a forward pass (prefill or single-token decode).
+        """Run a single-token decode step.
 
         Args:
-            token_ids: (batch, seq_len) token indices
+            token_ids: (batch, 1) token indices
             start_pos: position offset for RoPE and KV cache writes
             kv_caches: per-layer KV caches from allocate_kv_cache()
 
         Returns:
-            Logits tensor of shape (batch, seq_len, vocab_size)
+            Logits tensor of shape (batch, 1, vocab_size). This is a persistent buffer that the
+            next call overwrites; clone it if you need to keep it.
         """
         if not hasattr(self, "norm_out") or self.norm_out.shape[0] != token_ids.shape[0] or self.norm_out.device != token_ids.device or self.norm_out.dtype != self.embed_tokens.dtype:
             self.preallocate_buffers(token_ids.shape[0], device=token_ids.device, dtype=self.embed_tokens.dtype)
 
+        # one tiny kernel, scalar passed as an argument: no host->device copy that would stall
+        torch.add(self._decode_pos_offsets, start_pos, out=self.decode_pos)
+
+        if self.use_cuda_graphs:
+            return self._graph_decode_step(token_ids, kv_caches)
+        return self._decode_step(token_ids, kv_caches)
+
+    def _decode_step(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
+        """Decode at the position held in self.decode_pos. Allocation-free and host-sync-free,
+        so it can be captured into a CUDA graph."""
+        batch_size = token_ids.shape[0]
         with record_function("embed_lookup"):
-            residual = self.embed_tokens[token_ids]
+            torch.index_select(self.embed_tokens, 0, token_ids.reshape(-1),
+                               out=self.embed_out.view(batch_size, -1))
+            residual = self.embed_out
 
         mlp_out = None
         for i, layer in enumerate(self.layers):
@@ -479,7 +522,8 @@ class Llama:
                     mlp_out,
                     rope_embeds=(self.cos, self.sin),
                     kv_cache=kv_caches[i],
-                    cache_position=start_pos,
+                    cache_position=self._cache_pos_view,
+                    seq_len=self._seq_len_view,
                 )
         
         with record_function("final_norm"):
@@ -488,6 +532,32 @@ class Llama:
             out = torch.matmul(x, self.lm_head.T, out=self.lm_head_out)
 
         return out
+
+    def _graph_decode_step(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
+        key = (token_ids.shape[0], kv_caches[0][0].data_ptr())
+        if key not in self._graphs:
+            self._graphs[key] = self._capture_decode_graph(token_ids, kv_caches)
+        static_tokens, graph = self._graphs[key]
+        static_tokens.copy_(token_ids)
+        graph.replay()
+        return self.lm_head_out
+
+    def _capture_decode_graph(self, token_ids: torch.Tensor, kv_caches: list[tuple[torch.Tensor, torch.Tensor]]):
+        static_tokens = token_ids.clone()
+        # Warm up on a side stream so Triton autotuning/JIT and cuBLAS setup (which sync and
+        # allocate) finish before capture. Each warmup step rewrites the same KV slot with the
+        # same values, so it doesn't disturb the cache.
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            for _ in range(2):
+                self._decode_step(static_tokens, kv_caches)
+        torch.cuda.current_stream().wait_stream(side)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            self._decode_step(static_tokens, kv_caches)
+        return static_tokens, graph
 
     # ── Weight Loading ────────────────────────────────────────────────────
 

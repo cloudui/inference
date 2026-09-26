@@ -14,13 +14,14 @@ def fused_rope_cache_kernel(
     stride_batch_out_q,
     stride_batch_out_kv,
     stride_head_out_kv,
-    cache_pos,
+    cache_pos_ptr, # 1-element int32 device tensor, so CUDA graphs can replay at any position
     N_HEADS: tl.constexpr,
     KV_HEADS: tl.constexpr,
     HEAD_DIM: tl.constexpr
 ):
     pid_bh = tl.program_id(axis=0)
     GQA_RATIO = N_HEADS // KV_HEADS
+    cache_pos = tl.load(cache_pos_ptr)
 
     # q
     batch_idx_q = pid_bh // N_HEADS
@@ -88,9 +89,13 @@ def fused_rope_cache_decode_out(
     q_out: torch.Tensor, 
     k_cache: torch.Tensor, 
     v_cache: torch.Tensor, 
-    cache_pos: int,
+    cache_pos: int | torch.Tensor,
 ) -> None:
+    """cache_pos may be a Python int or a 1-element int32 device tensor; the tensor form
+    is read on the GPU, so a captured CUDA graph can replay it at a new position."""
     n_batches, seqlen, qkv_concat_dim = qkv_proj.shape
+    if not isinstance(cache_pos, torch.Tensor):
+        cache_pos = torch.tensor([cache_pos], dtype=torch.int32, device=qkv_proj.device)
 
     _, n_heads, _, head_dim = q_out.shape
     kv_heads = k_cache.shape[1]

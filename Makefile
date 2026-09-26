@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-hf bench-throughput-hf-small
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small
 
 # Default target: show help message
 help:
@@ -15,6 +15,7 @@ help:
 	@echo "  make test-flash-decode     - Run CPU reference comparison for flash-decode"
 	@echo "  make test-flash-decode-gpu - Run Triton flash-decode GPU sanity check"
 	@echo "  make test-forward          - Run Llama full model forward tests via pytest"
+	@echo "  make test-cuda-graphs      - Check CUDA graph decode matches eager decode"
 	@echo ""
 	@echo "Benchmark Commands:"
 	@echo "  make benchmark             - Run decode profiler (Llama-3 8B defaults)"
@@ -27,12 +28,13 @@ help:
 	@echo "  make bench-throughput      - Run throughput benchmark (Llama-3 8B defaults)"
 	@echo "  make bench-throughput-small - Run throughput benchmark with a tiny 2-layer config"
 	@echo "  make bench-throughput-profiled - Throughput with record_function scopes on (slower, CPU-bound)"
+	@echo "  make bench-throughput-graphs - Throughput with decode steps replayed from a CUDA graph"
 	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3 8B defaults)"
 	@echo "  make bench-throughput-hf-small - Run HF throughput benchmark with a tiny 2-layer config"
 	@echo "======================================================================"
 
 # Run all tests
-test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward
+test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward test-cuda-graphs
 
 # Individual Test Targets
 test-attention:
@@ -49,6 +51,9 @@ test-flash-decode-gpu:
 
 test-forward:
 	pytest tests/test_forward.py -v
+
+test-cuda-graphs:
+	pytest tests/test_cuda_graphs.py -v
 
 # Benchmarking & Profiling Targets
 benchmark:
@@ -72,6 +77,9 @@ bench-throughput-small:
 
 bench-throughput-profiled:
 	python benchmarks/bench_throughput.py --profile-scopes
+
+bench-throughput-graphs:
+	python benchmarks/bench_throughput.py --cuda-graphs
 
 # HF Benchmark & Profiling Targets
 benchmark-hf:
