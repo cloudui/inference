@@ -141,6 +141,16 @@ class BufferPool:
 
 # ── RoPE ──────────────────────────────────────────────────────────────────────
 
+def _rope_inv_freq(head_dim: int, theta: float, device: torch.device) -> torch.Tensor:
+    """Per-pair rotation speeds theta^(-2j/d), j = 0 .. d/2-1 (radians per position)."""
+    return 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+
+def _rope_table(inv_freq: torch.Tensor, max_seq_len: int) -> torch.Tensor:
+    """cis(m * inv_freq) for every position m: complex (max_seq_len, head_dim // 2)."""
+    positions = torch.arange(max_seq_len, device=inv_freq.device).float()
+    angles = torch.outer(positions, inv_freq)
+    return torch.polar(torch.ones_like(angles), angles)
+
 def precompute_rope_freqs_llama3(
     head_dim: int,
     max_seq_len: int,
@@ -153,52 +163,45 @@ def precompute_rope_freqs_llama3(
         Complex tensor of shape (max_seq_len, head_dim // 2) containing
         cis(freq * position) values for rotary embedding.
     """
-    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
-    positions = torch.arange(max_seq_len, device=device).float()
-    # (max_seq_len, head_dim // 2)
-    freqs_table = torch.outer(positions, freqs)
-    return torch.polar(torch.ones_like(freqs_table), freqs_table)
+    return _rope_table(_rope_inv_freq(head_dim, theta, device), max_seq_len)
 
 def precompute_rope_freqs_llama31(
     head_dim: int,
     max_seq_len: int,
     theta: float = 500000.0,
-    scaling: RopeScalingConfig = RopeScalingConfig(),
+    scaling: RopeScalingConfig | None = None,
     device: torch.device = torch.device("cuda"),
 ) -> torch.Tensor:
     """Precomputes the complex RoPE frequency table with Llama 3.1 frequency scaling.
 
-    Same output as precompute_rope_freqs_llama3, but the per-dimension inverse
-    frequencies are rescaled before building the table. Reference:
-    transformers.modeling_rope_utils._compute_llama3_parameters.
+    Same output as precompute_rope_freqs_llama3, but the per-pair inverse frequencies
+    are rescaled first, by how many full rotations each pair makes over the original
+    (8K) training context:
+      - >= high_freq_factor rotations: keep (training saw every angle)
+      - <  low_freq_factor rotations: divide by factor (angles past 8K were never seen)
+      - in between: blend linearly between the two
+    Position plays no part, so only the table changes, not the RoPE kernel.
+    Reference: transformers.modeling_rope_utils._compute_llama3_parameters.
 
     Returns:
         Complex tensor of shape (max_seq_len, head_dim // 2) containing
         cis(freq * position) values for rotary embedding.
     """
-    low_wavelength_cutoff = scaling.original_max_position_embeddings / scaling.high_freq_factor
-    high_wavelength_cutoff = scaling.original_max_position_embeddings / scaling.low_freq_factor
+    scaling = scaling or RopeScalingConfig()
 
-    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
-    wavelens = 2*torch.pi / freqs
-    low_mask = wavelens < low_wavelength_cutoff
-    mid_mask = (wavelens >= low_wavelength_cutoff) & (wavelens <= high_wavelength_cutoff)
-    high_mask = wavelens > high_wavelength_cutoff
+    inv_freq = _rope_inv_freq(head_dim, theta, device)
+    wavelens = 2 * torch.pi / inv_freq                                  # positions per full rotation
+    rotations = scaling.original_max_position_embeddings / wavelens     # full rotations over the original context
 
-    # slope factor
-    alphas = ((scaling.original_max_position_embeddings / wavelens - scaling.low_freq_factor) / 
-                            (scaling.high_freq_factor - scaling.low_freq_factor))
-    
-    freqs_new = torch.empty_like(freqs)
-    freqs_new[low_mask] = freqs[low_mask]
-    freqs_new[mid_mask] = ((1 - alphas[mid_mask]) * freqs[mid_mask] / scaling.factor + 
-                            alphas[mid_mask] * freqs[mid_mask])
-    freqs_new[high_mask] = freqs[high_mask] / scaling.factor
+    scaled = torch.where(rotations < scaling.low_freq_factor, inv_freq / scaling.factor, inv_freq)
 
-    positions = torch.arange(max_seq_len, device=device).float()
-    freqs_table = torch.outer(positions, freqs_new)
+    # 0 at low_freq_factor rotations (fully scaled), 1 at high_freq_factor (unscaled)
+    smooth = (rotations - scaling.low_freq_factor) / (scaling.high_freq_factor - scaling.low_freq_factor)
+    blended = (1 - smooth) * inv_freq / scaling.factor + smooth * inv_freq
+    in_blend = (rotations >= scaling.low_freq_factor) & (rotations <= scaling.high_freq_factor)
+    scaled = torch.where(in_blend, blended, scaled)
 
-    return torch.polar(torch.ones_like(freqs_table), freqs_table)
+    return _rope_table(scaled, max_seq_len)
 
 def precompute_rope_freqs(config: LlamaConfig, device: torch.device = torch.device("cuda")) -> torch.Tensor:
     """Picks the RoPE table variant for this config."""
