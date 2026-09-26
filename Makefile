@@ -16,6 +16,7 @@ help:
 	@echo "  make test-flash-decode-gpu - Run Triton flash-decode GPU sanity check"
 	@echo "  make test-forward          - Run Llama full model forward tests via pytest"
 	@echo "  make test-cuda-graphs      - Check CUDA graph decode matches eager decode"
+	@echo "  make test-rope             - Check Llama 3.1 RoPE scaling against HF"
 	@echo ""
 	@echo "Benchmark Commands:"
 	@echo "  make benchmark             - Run decode profiler (Llama-3 8B defaults)"
@@ -34,7 +35,7 @@ help:
 	@echo "======================================================================"
 
 # Run all tests
-test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward test-cuda-graphs
+test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward test-cuda-graphs test-rope
 
 # Individual Test Targets
 test-attention:
@@ -54,6 +55,9 @@ test-forward:
 
 test-cuda-graphs:
 	pytest tests/test_cuda_graphs.py -v
+
+test-rope:
+	pytest tests/test_rope.py -v
 
 # Benchmarking & Profiling Targets
 benchmark:

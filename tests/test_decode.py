@@ -19,7 +19,7 @@ from transformers.models.llama.modeling_llama import (
 )
 from transformers.cache_utils import DynamicCache
 
-from model import LlamaConfig, DecoderLayer, precompute_rope_freqs
+from model import LlamaConfig, DecoderLayer, precompute_rope_freqs_llama3
 
 DEVICE = torch.device("cuda")
 
@@ -117,7 +117,7 @@ def _get_rope_embeds(hf_cfg, x, position_ids):
 def test_single_decode_step(cache_position):
     """Single-token decode at various cache positions."""
     hf_layer, custom_layer, hf_cfg, custom_cfg = _make_decoder_layer_pair()
-    freqs_cis = precompute_rope_freqs(
+    freqs_cis = precompute_rope_freqs_llama3(
         custom_cfg.head_dim, custom_cfg.max_position_embeddings, custom_cfg.rope_theta
     )
     cos_table = freqs_cis.real.contiguous()
@@ -170,7 +170,7 @@ def test_single_decode_step(cache_position):
 def test_multi_step_decode():
     """Sequential decode steps, building KV cache incrementally."""
     hf_layer, custom_layer, hf_cfg, custom_cfg = _make_decoder_layer_pair()
-    freqs_cis = precompute_rope_freqs(
+    freqs_cis = precompute_rope_freqs_llama3(
         custom_cfg.head_dim, custom_cfg.max_position_embeddings, custom_cfg.rope_theta
     )
     cos_table = freqs_cis.real.contiguous()

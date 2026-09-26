@@ -51,6 +51,18 @@ from kernels import (
 # ── Config ────────────────────────────────────────────────────────────────────
 
 @dataclass
+class RopeScalingConfig:
+    """Llama 3.1 RoPE frequency scaling (HF config.json: rope_scaling, rope_type "llama3").
+
+    Defaults are the Llama 3.1 8B values.
+    """
+    factor: float = 8.0
+    low_freq_factor: float = 1.0
+    high_freq_factor: float = 4.0
+    original_max_position_embeddings: int = 8192
+
+
+@dataclass
 class LlamaConfig:
     hidden_size: int = 4096
     num_hidden_layers: int = 32
@@ -62,6 +74,22 @@ class LlamaConfig:
     rms_norm_eps: float = 1e-6
     rope_theta: float = 500000.0
     head_dim: int = 128                 # hidden_size // num_attention_heads
+    rope_scaling: RopeScalingConfig | None = None   # None = plain Llama 3 RoPE; set for Llama 3.1
+
+
+def _parse_rope_scaling(raw: dict | None) -> RopeScalingConfig | None:
+    """Reads config.json's rope_scaling. HF names the Llama 3.1 scheme rope_type "llama3"."""
+    if raw is None:
+        return None
+    rope_type = raw.get("rope_type", raw.get("type"))
+    if rope_type != "llama3":
+        raise ValueError(f"unsupported rope_scaling type: {rope_type!r}")
+    return RopeScalingConfig(
+        factor=raw["factor"],
+        low_freq_factor=raw["low_freq_factor"],
+        high_freq_factor=raw["high_freq_factor"],
+        original_max_position_embeddings=raw["original_max_position_embeddings"],
+    )
 
 
 # ── Buffer Pool ───────────────────────────────────────────────────────────────
@@ -113,13 +141,13 @@ class BufferPool:
 
 # ── RoPE ──────────────────────────────────────────────────────────────────────
 
-def precompute_rope_freqs(
+def precompute_rope_freqs_llama3(
     head_dim: int,
     max_seq_len: int,
     theta: float = 500000.0,
     device: torch.device = torch.device("cuda"),
 ) -> torch.Tensor:
-    """Precomputes the complex RoPE frequency table.
+    """Precomputes the complex RoPE frequency table (Llama 3: unscaled frequencies).
 
     Returns:
         Complex tensor of shape (max_seq_len, head_dim // 2) containing
@@ -130,6 +158,57 @@ def precompute_rope_freqs(
     # (max_seq_len, head_dim // 2)
     freqs_table = torch.outer(positions, freqs)
     return torch.polar(torch.ones_like(freqs_table), freqs_table)
+
+def precompute_rope_freqs_llama31(
+    head_dim: int,
+    max_seq_len: int,
+    theta: float = 500000.0,
+    scaling: RopeScalingConfig = RopeScalingConfig(),
+    device: torch.device = torch.device("cuda"),
+) -> torch.Tensor:
+    """Precomputes the complex RoPE frequency table with Llama 3.1 frequency scaling.
+
+    Same output as precompute_rope_freqs_llama3, but the per-dimension inverse
+    frequencies are rescaled before building the table. Reference:
+    transformers.modeling_rope_utils._compute_llama3_parameters.
+
+    Returns:
+        Complex tensor of shape (max_seq_len, head_dim // 2) containing
+        cis(freq * position) values for rotary embedding.
+    """
+    low_wavelength_cutoff = scaling.original_max_position_embeddings / scaling.high_freq_factor
+    high_wavelength_cutoff = scaling.original_max_position_embeddings / scaling.low_freq_factor
+
+    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+    wavelens = 2*torch.pi / freqs
+    low_mask = wavelens < low_wavelength_cutoff
+    mid_mask = (wavelens >= low_wavelength_cutoff) & (wavelens <= high_wavelength_cutoff)
+    high_mask = wavelens > high_wavelength_cutoff
+
+    # slope factor
+    alphas = ((scaling.original_max_position_embeddings / wavelens - scaling.low_freq_factor) / 
+                            (scaling.high_freq_factor - scaling.low_freq_factor))
+    
+    freqs_new = torch.empty_like(freqs)
+    freqs_new[low_mask] = freqs[low_mask]
+    freqs_new[mid_mask] = ((1 - alphas[mid_mask]) * freqs[mid_mask] / scaling.factor + 
+                            alphas[mid_mask] * freqs[mid_mask])
+    freqs_new[high_mask] = freqs[high_mask] / scaling.factor
+
+    positions = torch.arange(max_seq_len, device=device).float()
+    freqs_table = torch.outer(positions, freqs_new)
+
+    return torch.polar(torch.ones_like(freqs_table), freqs_table)
+
+def precompute_rope_freqs(config: LlamaConfig, device: torch.device = torch.device("cuda")) -> torch.Tensor:
+    """Picks the RoPE table variant for this config."""
+    if config.rope_scaling is None:
+        return precompute_rope_freqs_llama3(
+            config.head_dim, config.max_position_embeddings, config.rope_theta, device=device
+        )
+    return precompute_rope_freqs_llama31(
+        config.head_dim, config.max_position_embeddings, config.rope_theta, config.rope_scaling, device=device
+    )
 
 def rotate_half(x: torch.Tensor):
     """
@@ -413,9 +492,7 @@ class Llama:
         self.lm_head = torch.empty(config.vocab_size, config.hidden_size)
 
         # Precomputed RoPE frequencies
-        freqs_cis = precompute_rope_freqs(
-            config.head_dim, config.max_position_embeddings, config.rope_theta
-        )
+        freqs_cis = precompute_rope_freqs(config)
         self.cos = freqs_cis.real.contiguous()
         self.sin = freqs_cis.imag.contiguous()
 
@@ -589,6 +666,7 @@ class Llama:
             rms_norm_eps=raw.get("rms_norm_eps", 1e-6),
             rope_theta=raw.get("rope_theta", 500000.0),
             head_dim=raw["hidden_size"] // raw["num_attention_heads"],
+            rope_scaling=_parse_rope_scaling(raw.get("rope_scaling")),
         )
 
         model = Llama(config)

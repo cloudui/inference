@@ -16,7 +16,7 @@ from transformers.models.llama.modeling_llama import LlamaAttention, LlamaRotary
 
 # Import your custom modules
 import model
-from model import LlamaConfig, Attention, precompute_rope_freqs
+from model import LlamaConfig, Attention, precompute_rope_freqs_llama3
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -77,7 +77,7 @@ def run_attention_test():
     x = torch.randn(batch_size, seq_len, hidden_size, device=DEVICE, dtype=torch.float16)
     
     # Precompute RoPE tables
-    freqs_cis = precompute_rope_freqs(
+    freqs_cis = precompute_rope_freqs_llama3(
         head_dim=head_dim,
         max_seq_len=max_seq_len,
         theta=custom_config.rope_theta,
