@@ -37,6 +37,8 @@ def run_split_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_len
         q = torch.randn(batch_size, num_q_heads, 1, head_dim, device=device, dtype=dtype)
         k = torch.randn(batch_size, num_kv_heads, seq_len, head_dim, device=device, dtype=dtype)
         v = torch.randn(batch_size, num_kv_heads, seq_len, head_dim, device=device, dtype=dtype)
+        # the kernels read seq_len from a device tensor (CUDA-graph replayable)
+        seq_len_t = torch.tensor([seq_len], dtype=torch.int32, device=device)
         out = torch.empty((batch_size, num_q_heads, 1, head_dim), device=device, dtype=dtype)
 
         # Baseline: PyTorch SDPA with native GQA
@@ -61,7 +63,7 @@ def run_split_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_len
             # 1. Bench Generation Kernel Only
             gen_ms = triton.testing.do_bench(
                 lambda: flash_decode_generation_kernel[grid_gen](
-                    q, k, v, mid_o, mid_lse, seq_len, scale, head_dim,
+                    q, k, v, mid_o, mid_lse, seq_len_t, scale, head_dim,
                     stride_q_batch, stride_q_head, stride_k_batch, stride_k_head, stride_k_seq,
                     stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa,
                     stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa,
@@ -81,7 +83,7 @@ def run_split_benchmark(batch_size, num_q_heads, num_kv_heads, head_dim, seq_len
 
             # 3. Bench Total Triton (Gen + Reduce Combined)
             total_triton_ms = triton.testing.do_bench(
-                lambda: flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out, num_splits=num_splits)
+                lambda: flash_decode_out(q, k, v, seq_len_t, mid_o, mid_lse, out, num_splits=num_splits)
             )
 
             print(f"| {num_splits:<12} | {gen_ms:>18.4f} | {reduce_ms:>20.4f} | {total_triton_ms:>18.4f} | {sdpa_ms:>18.4f} |")

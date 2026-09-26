@@ -35,8 +35,10 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--seq-lens", type=int, nargs="+", default=DEFAULT_SEQ_LENS)
     p.add_argument("--runs", nargs="+", default=DEFAULT_RUNS,
-                   help="impl:mode, impl in {custom, hf}; custom modes: cuda-graphs, eager; "
-                        "hf modes: see bench_throughput_hf.py")
+                   help="impl:mode, impl in {custom, hf, vllm}; custom modes: cuda-graphs, eager; "
+                        "hf modes: see bench_throughput_hf.py; vllm mode: default")
+    p.add_argument("--vllm-python", default="/opt/venvs/vllm/bin/python",
+                   help="Python of the virtualenv vLLM is installed in (it pins its own torch)")
     p.add_argument("--decode-steps", type=int, default=128)
     p.add_argument("--warmup", type=int, default=30)
     p.add_argument("--tag", default=datetime.datetime.now().strftime("%Y%m%d-%H%M"))
@@ -51,6 +53,8 @@ def bench_cmd(run: str, seq_len: int, args) -> list[str]:
     if impl == "custom":
         return [sys.executable, str(HERE / "bench_throughput.py"), *common,
                 *(["--cuda-graphs"] if mode == "cuda-graphs" else [])]
+    if impl == "vllm":
+        return [args.vllm_python, str(HERE / "bench_throughput_vllm.py"), *common]
     return [sys.executable, str(HERE / "bench_throughput_hf.py"), *common, "--mode", mode]
 
 
@@ -86,11 +90,11 @@ def main():
             results[seq_len, run] = r
             print(f"{r:.3f} ms/tok ({1e3 / r:.1f} tok/s)" if isinstance(r, float) else r, flush=True)
 
-    hf_runs = [r for r in args.runs if r.startswith("hf:")]
+    hf_runs = [r for r in args.runs if r.startswith(("hf:", "vllm:"))]
     ours = next((r for r in args.runs if r.startswith("custom:")), None)
     header = ["context", *[f"{r} tok/s" for r in args.runs]]
     if ours and hf_runs:
-        header.append("ours vs best HF")
+        header.append("ours vs best baseline")
     if ours:
         header += ["ours GB/s", "ours % of 820 GB/s ceiling", "KV share of bytes"]
 
