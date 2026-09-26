@@ -1,0 +1,3 @@
+timestamp,commit,dirty,model,seq_len,decode_steps,warmup,batch_size,profiler_scopes,tok_s,ms_per_tok,gpu,cpu,torch,triton,cuda,note
+2026-09-26T00:49:49,4d0f600,False,llama3-8b,512,128,30,1,False,51.48,19.426,NVIDIA RTX PRO 4500 Blackwell,AMD EPYC 7663 56-Core Processor,2.8.0+cu128,3.4.0,12.8,baseline after profiler toggle
+2026-09-26T00:49:57,4d0f600,False,llama3-8b,512,128,30,1,True,42.24,23.673,NVIDIA RTX PRO 4500 Blackwell,AMD EPYC 7663 56-Core Processor,2.8.0+cu128,3.4.0,12.8,baseline after profiler toggle
