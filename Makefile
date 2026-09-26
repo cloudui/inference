@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small bench-context-sweep
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs test-rope test-swiglu benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small bench-context-sweep
 
 # Default target: show help message
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make test-forward          - Run Llama full model forward tests via pytest"
 	@echo "  make test-cuda-graphs      - Check CUDA graph decode matches eager decode"
 	@echo "  make test-rope             - Check Llama 3.1 RoPE scaling against HF"
+	@echo "  make test-swiglu           - Check the SwiGLU kernel, including strided gate/up halves"
 	@echo ""
 	@echo "Benchmark Commands:"
 	@echo "  make benchmark             - Run decode profiler (Llama-3 8B defaults)"
@@ -36,7 +37,7 @@ help:
 	@echo "======================================================================"
 
 # Run all tests
-test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward test-cuda-graphs test-rope
+test: test-flash-decode test-flash-decode-gpu test-attention test-decode test-forward test-cuda-graphs test-rope test-swiglu
 
 # Individual Test Targets
 test-attention:
@@ -59,6 +60,9 @@ test-cuda-graphs:
 
 test-rope:
 	pytest tests/test_rope.py -v
+
+test-swiglu:
+	pytest tests/test_swiglu.py -v
 
 # Benchmarking & Profiling Targets
 benchmark:

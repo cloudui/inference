@@ -160,10 +160,10 @@ def test_single_decode_step():
     )
 
 
-def test_multi_step_decode():
+@pytest.mark.parametrize("batch", [1, 3])
+def test_multi_step_decode(batch):
     """Sequential decode steps, comparing logits at each step."""
     hf_model, custom_model, hf_cfg, custom_cfg = _make_model_pair()
-    batch = 1
     n_steps = 10
 
     hf_cache = DynamicCache()
@@ -171,7 +171,7 @@ def test_multi_step_decode():
 
     for step in range(n_steps):
         token_ids = torch.randint(0, VOCAB, (batch, 1), device=DEVICE)
-        position_ids = torch.tensor([[step]], device=DEVICE)
+        position_ids = torch.full((batch, 1), step, device=DEVICE)
 
         with torch.inference_mode():
             hf_out = hf_model(
@@ -190,13 +190,13 @@ def test_multi_step_decode():
         )
 
 
-def test_argmax_agreement():
+@pytest.mark.parametrize("batch", [1, 3])
+def test_argmax_agreement(batch):
     """Verifies that the top-1 predicted token matches HF at every step.
 
     Even if logit values differ slightly due to fp16, the argmax should agree.
     """
     hf_model, custom_model, hf_cfg, custom_cfg = _make_model_pair()
-    batch = 1
     n_steps = 16
 
     hf_cache = DynamicCache()
@@ -204,7 +204,7 @@ def test_argmax_agreement():
 
     for step in range(n_steps):
         token_ids = torch.randint(0, VOCAB, (batch, 1), device=DEVICE)
-        position_ids = torch.tensor([[step]], device=DEVICE)
+        position_ids = torch.full((batch, 1), step, device=DEVICE)
 
         with torch.inference_mode():
             hf_out = hf_model(
@@ -216,11 +216,18 @@ def test_argmax_agreement():
 
         custom_logits = custom_model.forward(token_ids, start_pos=step, kv_caches=custom_caches)
 
-        hf_token = hf_out.logits.argmax(dim=-1)
+        hf_logits = hf_out.logits.float()
+        hf_token = hf_logits.argmax(dim=-1)
         custom_token = custom_logits.argmax(dim=-1)
 
-        assert torch.equal(hf_token, custom_token), (
-            f"Argmax mismatch at step {step}: HF={hf_token.item()}, custom={custom_token.item()}"
+        # A different pick is only allowed on a near-tie: fp16 logits can tie exactly, and the
+        # two implementations then break the tie differently. HF must rate our pick within the
+        # same 5e-3 used for the logit comparisons.
+        hf_max = hf_logits.max(dim=-1).values
+        hf_at_ours = hf_logits.gather(-1, custom_token.unsqueeze(-1)).squeeze(-1)
+        assert torch.all(hf_max - hf_at_ours <= 5e-3), (
+            f"Argmax mismatch at step {step}: HF={hf_token.tolist()}, custom={custom_token.tolist()}, "
+            f"HF logit gap {(hf_max - hf_at_ours).tolist()}"
         )
 
 

@@ -77,10 +77,7 @@ def _decode(model, caches, tokens, start_pos):
     return torch.stack(outs)
 
 
-# batch > 1 is excluded: swiglu_out's x.view(-1) fails on the non-contiguous gate/up halves of
-# the fused gate_up buffer for batch > 1. That's a pre-existing eager-path bug on main,
-# unrelated to graphs. Add 2 back once it's fixed.
-@pytest.mark.parametrize("batch", [1])
+@pytest.mark.parametrize("batch", [1, 3])
 @pytest.mark.parametrize("start_pos", [0, 29])
 def test_graph_matches_eager(batch, start_pos):
     steps = 100  # crosses 32/64/128-row KV block boundaries
