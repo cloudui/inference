@@ -265,6 +265,10 @@ As predicted, the gain is small (about 0.37 ms/token, +2%): with scopes off the 
 
 Batch > 1 is excluded from that test because of a pre-existing bug on `main`: `swiglu_out` calls `.view(-1)` on the non-contiguous halves of the fused `gate_up` buffer. It needs fixing before larger batches are benchmarked.
 
+## Follow-up: long context and Llama 3.1 RoPE
+
+See `LONG_CONTEXT.md`: Llama 3.1 RoPE scaling, a sweep from 512 to 112K tokens against three HF modes, and why HF's StaticCache path collapses at long context. Short version: the engine stays at 96–98% of the practical bandwidth ceiling at every length and reaches 2.2× HF's best at 112K.
+
 ## Files
 
 On this branch, in `docs/perf_history/`:
@@ -273,6 +277,7 @@ On this branch, in `docs/perf_history/`:
 - `OPTIMIZATIONS.md`: a short version for a blog post or presentation.
 - `performance_history.csv`: one row per benchmarked commit (42), including failures with stage and error. Columns cover the spec median, min/max, repeats, best estimate, Δ, hooks-on median, ms/token, CPU enqueue ms/token, and notes.
 - `throughput_history.png`: the chart above.
+- `LONG_CONTEXT.md`: the long-context follow-up, with `long_context_sweep.csv`, `long_context_breakdown_32k.csv`, three charts (`long_context_*.png`) and the script that draws them (`long_context_charts.py`).
 
 On branch `perf-history-sweep`:
 

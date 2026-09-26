@@ -1,0 +1,13 @@
+impl,category,gpu_ms
+Ours,Weight GEMVs,18.55
+Ours,Attention,5.38
+Ours,KV cache copies,0.0
+Ours,Other,0.18
+HF DynamicCache,Weight GEMVs,19.1
+HF DynamicCache,Attention,4.64
+HF DynamicCache,KV cache copies,11.1
+HF DynamicCache,Other,1.02
+HF StaticCache,Weight GEMVs,18.74
+HF StaticCache,Attention,48.06
+HF StaticCache,KV cache copies,29.71
+HF StaticCache,Other,1.38
