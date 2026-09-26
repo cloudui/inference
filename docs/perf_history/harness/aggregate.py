@@ -94,9 +94,9 @@ for k, v in hf.items():
                 ha="right", va="bottom", fontsize=8.5, color=INK2)
 
 # label the biggest jumps (primary series), above the line
-jumps = sorted([(y[i] - y[i - 1], i) for i in range(1, len(okr))], reverse=True)[:5]
+jumps = sorted([(y[i] - y[i - 1], i) for i in range(1, len(okr))], reverse=True)[:6]
 # hand-placed (dx, dy, ha) per label so nothing collides; default for any other commit
-PLACE = {"7d5c517": (-10, 66, "right"), "5a7b6c0": (-8, 78, "center"), "d326973": (18, 34, "left"),
+PLACE = {"03e23c3": (-14, 46, "right"), "7d5c517": (-10, 66, "right"), "5a7b6c0": (-8, 78, "center"), "d326973": (18, 34, "left"),
          "cd9b714": (-12, 62, "right"), "ef70981": (14, 34, "left")}
 for d, i in jumps:
     dx, dy, ha = PLACE.get(okr[i]["commit"], (0, 30, "center"))

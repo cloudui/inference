@@ -177,5 +177,10 @@
  "ebdf877": {
   "summary": "Adds flash_prefill package + import in kernels/__init__",
   "notes": "Decode path unchanged; code at HEAD (40dc0b6 only edits README)"
+ },
+ "03e23c3": {
+  "summary": "CUDA graphs: one captured decode step replayed per token (position read from a device tensor)",
+  "notes": "Measured with bench_fixed.py --cuda-graphs, 2026-09-26, on a later pod: control rerun of ebdf877 there gave 51.37 vs 51.21 in the sweep (+0.3%). Hooks on and off are equal because captured steps skip record_function. CPU enqueue 0.03 ms/tok.",
+  "short": "CUDA graphs"
  }
 }

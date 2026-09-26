@@ -31,6 +31,7 @@ p.add_argument("--decode-steps", type=int, default=128)
 p.add_argument("--warmup-runs", type=int, default=3)
 p.add_argument("--timed-runs", type=int, default=5)
 p.add_argument("--batch-size", type=int, default=1)
+p.add_argument("--cuda-graphs", action="store_true", help="model.enable_cuda_graphs() (commits from 03e23c3 on)")
 p.add_argument("--json-out")
 args = p.parse_args()
 if args.json_out: args.json_out = os.path.abspath(args.json_out)
@@ -110,6 +111,9 @@ try:
         K[:, :, :args.seq_len] = torch.randn_like(K[:, :, :args.seq_len]) * 0.02
         V[:, :, :args.seq_len] = torch.randn_like(V[:, :, :args.seq_len]) * 0.02
     tok = torch.zeros(args.batch_size, 1, dtype=torch.long, device=dev)
+    if args.cuda_graphs:
+        model.enable_cuda_graphs()
+    result["cuda_graphs"] = args.cuda_graphs
     torch.cuda.synchronize()
 
     def one_run():
