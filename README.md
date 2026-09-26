@@ -14,5 +14,8 @@ Triton stack:
 # Stack
 - Triton 
 - CUDA
+- FP16
+
+## Tentative Additions
 - H100/Hopper
-- FP16/BF16/FP8
+- BF16/FP8
