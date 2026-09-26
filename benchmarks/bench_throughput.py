@@ -5,22 +5,18 @@ Usage:
     python bench_throughput.py [--seq-len 512] [--decode-steps 128] [--small] [--batch-size 1]
 
 Measures wall-clock tok/s for single-token decode steps using CUDA event timing.
-KV cache is pre-filled with random data to simulate mid-sequence decoding.
+KV cache is pre-filled with random data to simulate mid-sequence decoding, and sized to
+the positions the run touches (seq_len + warmup + decode_steps), so long contexts fit.
 Each run is appended to benchmarks/results/throughput_runs.csv with the commit and
 environment (disable with --no-log).
 """
 
 import argparse
-import csv
-import datetime
-import platform
-import subprocess
-from pathlib import Path
 
 import torch
-import triton
 
-from model import Llama, LlamaConfig, set_profiling, profiling_enabled
+import run_log
+from model import Llama, LlamaConfig, RopeScalingConfig, set_profiling, profiling_enabled
 
 
 def parse_args():
@@ -39,6 +35,8 @@ def parse_args():
                         "also enabled by INFERENCE_PROFILE=1)")
     p.add_argument("--cuda-graphs",  action="store_true",
                    help="Replay decode steps from a captured CUDA graph (model.enable_cuda_graphs())")
+    p.add_argument("--kv-len",       type=int, default=None,
+                   help="KV cache rows to allocate (default: seq_len + warmup + decode_steps)")
     p.add_argument("--no-log",       action="store_true",
                    help="Don't append this run to benchmarks/results/throughput_runs.csv")
     p.add_argument("--note",         type=str, default="",
@@ -46,37 +44,13 @@ def parse_args():
     return p.parse_args()
 
 
-RUN_LOG = Path(__file__).resolve().parent / "results" / "throughput_runs.csv"
-
-
-def _git(*cmd):
-    try:
-        return subprocess.check_output(["git", *cmd], cwd=Path(__file__).resolve().parent, text=True,
-                                       stderr=subprocess.DEVNULL).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return ""
-
-
-def _cpu_model():
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor()
-
-
-def log_run(args, tok_per_sec, per_step_ms):
-    """Append one row per run so throughput history survives pod resets."""
-    row = {
-        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
-        "commit": _git("rev-parse", "--short", "HEAD"),
-        # the run log itself doesn't count, or every run after the first would look dirty
-        "dirty": bool(_git("status", "--porcelain", "--untracked-files=no", "--",
-                           ":(top)", ":(top,exclude)benchmarks/results")),
-        "model": "tiny" if args.small else "llama3-8b",
+def log_run(args, kv_len, tok_per_sec, per_step_ms):
+    run_log.log_run({
+        "impl": "custom",
+        "mode": "cuda-graphs" if args.cuda_graphs else "eager",
+        "model": "tiny" if args.small else "llama3.1-8b",
         "seq_len": args.seq_len,
+        "kv_len": kv_len,
         "decode_steps": args.decode_steps,
         "warmup": args.warmup,
         "batch_size": args.batch_size,
@@ -84,28 +58,8 @@ def log_run(args, tok_per_sec, per_step_ms):
         "cuda_graphs": args.cuda_graphs,
         "tok_s": round(tok_per_sec, 2),
         "ms_per_tok": round(per_step_ms, 3),
-        "gpu": torch.cuda.get_device_name(),
-        "cpu": _cpu_model(),
-        "torch": torch.__version__,
-        "triton": triton.__version__,
-        "cuda": torch.version.cuda,
         "note": args.note,
-    }
-    RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
-    rows, fields = [], list(row)
-    if RUN_LOG.exists():
-        with open(RUN_LOG, newline="") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            old_fields = reader.fieldnames or []
-        # keep old column order, append any new columns (old rows get them empty)
-        fields = old_fields + [k for k in row if k not in old_fields]
-    rows.append(row)
-    with open(RUN_LOG, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerows(rows)
-    print(f"  Logged to {RUN_LOG.relative_to(RUN_LOG.parents[2])}")
+    })
 
 
 def build_model(args):
@@ -121,7 +75,8 @@ def build_model(args):
             head_dim=64,
         )
     else:
-        cfg = LlamaConfig()
+        # Llama 3.1 8B: 128K positions with scaled RoPE
+        cfg = LlamaConfig(max_position_embeddings=131072, rope_scaling=RopeScalingConfig())
 
     device = torch.device("cuda")
     model = Llama(cfg)
@@ -144,9 +99,13 @@ def build_model(args):
         layer.mlp.w_gate_up = rand_fp16(2 * cfg.intermediate_size, cfg.hidden_size)
         layer.mlp.w_down = rand_fp16(cfg.hidden_size, cfg.intermediate_size)
 
+    # 128 KiB per token at 8B, so a max_position_embeddings-sized cache (16 GiB) wouldn't fit
+    kv_len = args.kv_len or args.seq_len + args.warmup + args.decode_steps
+    assert kv_len >= args.seq_len + args.warmup + args.decode_steps, "--kv-len too small for this run"
+    assert kv_len <= cfg.max_position_embeddings, "--kv-len exceeds the RoPE table"
     kv_caches = model.allocate_kv_cache(
         batch_size=args.batch_size,
-        max_seq_len=cfg.max_position_embeddings,
+        max_seq_len=kv_len,
         device=device,
     )
     return model, kv_caches, cfg
@@ -206,10 +165,10 @@ def main():
     per_step_ms = elapsed_ms / n
 
     # ── Report ────────────────────────────────────────────────────────────
-    model_name = "Llama-3 8B" if not args.small else "Tiny (2-layer)"
+    model_name = "Llama-3.1 8B" if not args.small else "Tiny (2-layer)"
     print(f"\n{'─'*60}")
     print(f"  Model:            {model_name}")
-    print(f"  Context length:   {args.seq_len} → {start_pos + n}")
+    print(f"  Context length:   {args.seq_len} → {start_pos + n}  (KV cache {kv_caches[0][0].shape[2]} rows)")
     print(f"  Decode steps:     {n}")
     print(f"  Batch size:       {args.batch_size}")
     print(f"{'─'*60}")
@@ -218,7 +177,7 @@ def main():
     print(f"  Throughput:       {tok_per_sec:.1f} tok/s")
     print(f"{'─'*60}")
     if not args.no_log:
-        log_run(args, tok_per_sec, per_step_ms)
+        log_run(args, kv_caches[0][0].shape[2], tok_per_sec, per_step_ms)
     print()
 
 

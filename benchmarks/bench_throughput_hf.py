@@ -2,17 +2,36 @@
 bench_throughput_hf.py — Decode tok/s benchmark for the Hugging Face Llama implementation.
 
 Usage:
-    python benchmarks/bench_throughput_hf.py [--seq-len 512] [--decode-steps 128] [--small] [--batch-size 1] [--dtype float16] [--compiled]
+    python benchmarks/bench_throughput_hf.py [--seq-len 512] [--decode-steps 128] [--small]
+        [--batch-size 1] [--dtype float16] [--mode eager-dynamic]
 
-Measures wall-clock tok/s for single-token decode steps using CUDA event timing.
-KV cache is pre-filled with random data to simulate prior context.
+Same workload as bench_throughput.py: Llama 3.1 8B shape, random fp16 weights, KV cache
+pre-filled with random data to seq_len, then warmup + timed single-token decode steps,
+timed with CUDA events. Each run is appended to benchmarks/results/throughput_runs.csv.
+
+Modes:
+  eager-dynamic : SDPA, DynamicCache (HF's default; torch.cat grows the cache every step)
+  eager-static  : SDPA, StaticCache
+  compile-static: torch.compile(model) + StaticCache
+  compile-cg    : torch.compile(model, mode="reduce-overhead") + StaticCache (CUDA graphs);
+                  the strongest HF baseline
+
+The StaticCache is filled by writing random K/V straight into its tensors. A seq_len-token
+prefill forward would build a seq_len x seq_len causal mask (8 GiB at 64K).
+StaticCache is sized to exactly the positions the run touches, because SDPA attends over
+all max_cache_len rows (masked), not just the filled ones.
 """
 
 import argparse
-import time
+
 import torch
+import transformers
 from transformers import LlamaConfig, LlamaForCausalLM
 from transformers.cache_utils import DynamicCache, StaticCache
+
+import run_log
+
+MODES = ["eager-dynamic", "eager-static", "compile-static", "compile-cg"]
 
 
 def parse_args():
@@ -25,18 +44,19 @@ def parse_args():
                    help="Warmup decode steps (not measured)")
     p.add_argument("--batch-size",   type=int, default=1)
     p.add_argument("--dtype",        type=str, default="float16", choices=["float16", "bfloat16"])
-    p.add_argument("--compiled",     action="store_true",
-                   help="Compile the model using torch.compile")
-    p.add_argument("--static-cache", action="store_true",
-                   help="Use StaticCache instead of DynamicCache (fairer comparison with custom impl)")
+    p.add_argument("--mode",         type=str, default="eager-dynamic", choices=MODES)
     p.add_argument("--small",        action="store_true",
                    help="Use tiny 2-layer config for fast iteration")
+    p.add_argument("--no-log",       action="store_true",
+                   help="Don't append this run to benchmarks/results/throughput_runs.csv")
+    p.add_argument("--note",         type=str, default="",
+                   help="Free-text note stored with the logged run")
     return p.parse_args()
 
 
-def build_model(args, device, dtype):
+def build_config(args):
     if args.small:
-        cfg = LlamaConfig(
+        return LlamaConfig(
             hidden_size=512,
             num_hidden_layers=2,
             num_attention_heads=8,
@@ -48,21 +68,55 @@ def build_model(args, device, dtype):
             rope_theta=10000.0,
             attn_implementation="sdpa",
         )
-    else:
-        cfg = LlamaConfig(
-            hidden_size=4096,
-            num_hidden_layers=32,
-            num_attention_heads=32,
-            num_key_value_heads=8,
-            intermediate_size=14336,
-            vocab_size=128256,
-            max_position_embeddings=8192,
-            rms_norm_eps=1e-5,
-            rope_theta=500000.0,
-            attn_implementation="sdpa",
-        )
+    # Llama 3.1 8B
+    return LlamaConfig(
+        hidden_size=4096,
+        num_hidden_layers=32,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        intermediate_size=14336,
+        vocab_size=128256,
+        max_position_embeddings=131072,
+        rms_norm_eps=1e-5,
+        rope_theta=500000.0,
+        rope_scaling={
+            "factor": 8.0,
+            "low_freq_factor": 1.0,
+            "high_freq_factor": 4.0,
+            "original_max_position_embeddings": 8192,
+            "rope_type": "llama3",
+        },
+        attn_implementation="sdpa",
+    )
 
-    print(f"Initializing HF LlamaModel on {device} ({args.dtype})...")
+
+def build_cache(args, cfg, device, dtype):
+    head_dim = cfg.hidden_size // cfg.num_attention_heads
+    kv_shape = (args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim)
+
+    def rand_kv():
+        return torch.randn(kv_shape, device=device, dtype=dtype) * 0.02
+
+    if args.mode == "eager-dynamic":
+        cache = DynamicCache(config=cfg)
+        for layer_idx in range(cfg.num_hidden_layers):
+            cache.update(rand_kv(), rand_kv(), layer_idx)
+        return cache
+
+    cache = StaticCache(config=cfg, max_cache_len=args.seq_len + args.warmup + args.decode_steps)
+    one_token = torch.zeros(args.batch_size, cfg.num_key_value_heads, 1, head_dim, device=device, dtype=dtype)
+    for layer in cache.layers:
+        layer.lazy_initialization(one_token, one_token)
+        layer.keys[:, :, :args.seq_len] = rand_kv()
+        layer.values[:, :, :args.seq_len] = rand_kv()
+        # transformers 5.x StaticLayer writes at its own counter, not the cache_position passed in
+        layer.cumulative_length.fill_(args.seq_len)
+    return cache
+
+
+def build_model(args, device, dtype):
+    cfg = build_config(args)
+    print(f"Initializing HF LlamaForCausalLM on {device} ({args.dtype})...")
     # Instantiate directly on GPU in target precision
     old_default_dtype = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
@@ -71,37 +125,15 @@ def build_model(args, device, dtype):
     torch.set_default_dtype(old_default_dtype)
     model.eval()
 
-    # KV cache setup
-    head_dim = cfg.hidden_size // cfg.num_attention_heads
+    print(f"Pre-filling {args.mode} cache to seq_len={args.seq_len}...")
+    cache = build_cache(args, cfg, device, dtype)
 
-    if args.static_cache:
-        # StaticCache: pre-allocated, no dynamic cat/copy overhead
-        # Size to actual usage so SDPA only attends over filled positions
-        max_cache_len = args.seq_len + args.warmup + args.decode_steps + 16
-        hf_cache = StaticCache(config=cfg, max_cache_len=max_cache_len, batch_size=args.batch_size)
-        # Pre-fill by running dummy forward steps
-        if args.seq_len > 0:
-            print(f"Pre-filling StaticCache to seq_len={args.seq_len}...")
-            prefill_tokens = torch.zeros(args.batch_size, 1, dtype=torch.long, device=device)
-            with torch.inference_mode():
-                for i in range(args.seq_len):
-                    position_ids = torch.tensor([[i]], device=device)
-                    model(input_ids=prefill_tokens, past_key_values=hf_cache, use_cache=True, position_ids=position_ids)
-    else:
-        # DynamicCache: grows via cat/copy on each step
-        hf_cache = DynamicCache()
-        if args.seq_len > 0:
-            print(f"Pre-filling DynamicCache to seq_len={args.seq_len}...")
-            for layer_idx in range(cfg.num_hidden_layers):
-                k = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
-                v = torch.randn(args.batch_size, cfg.num_key_value_heads, args.seq_len, head_dim, device=device, dtype=dtype) * 0.02
-                hf_cache.update(k, v, layer_idx)
-
-    if args.compiled:
-        print("Compiling HF model (this may take a few minutes)...")
-        model = torch.compile(model)
-
-    return model, hf_cache, cfg
+    fwd = model
+    if args.mode == "compile-static":
+        fwd = torch.compile(model)
+    elif args.mode == "compile-cg":
+        fwd = torch.compile(model, mode="reduce-overhead")
+    return fwd, cache, cfg
 
 
 def main():
@@ -112,22 +144,31 @@ def main():
     print(f"\n{'='*60}")
     print(f"  Hugging Face Decode Throughput Benchmark")
     print(f"  seq_len={args.seq_len}  decode_steps={args.decode_steps}  batch={args.batch_size}")
-    cache_type = "static" if args.static_cache else "dynamic"
-    print(f"  dtype={args.dtype}  compiled={args.compiled}  cache={cache_type}")
+    print(f"  dtype={args.dtype}  mode={args.mode}")
     print(f"{'='*60}\n")
 
-    model, kv_cache, cfg = build_model(args, device, dtype)
+    fwd, cache, cfg = build_model(args, device, dtype)
+    static = args.mode != "eager-dynamic"
 
     token_ids = torch.zeros(args.batch_size, 1, dtype=torch.long, device=device)
+    n_pos = args.warmup + args.decode_steps
+    # built up front so the timed loop does no host->device copies
+    position_ids = [torch.full((args.batch_size, 1), args.seq_len + i, device=device) for i in range(n_pos)]
+    cache_position = [torch.tensor([args.seq_len + i], device=device) for i in range(n_pos)]
+
+    def step(i):
+        kwargs = dict(input_ids=token_ids, past_key_values=cache, use_cache=True, position_ids=position_ids[i])
+        if static:
+            kwargs["cache_position"] = cache_position[i]
+        fwd(**kwargs)
+
     torch.cuda.synchronize()
 
     # ── Warmup ────────────────────────────────────────────────────────────
-    print(f"Warming up ({args.warmup} steps)...")
-    for i in range(args.warmup):
-        pos = args.seq_len + i
-        position_ids = torch.tensor([[pos]], device=device)
-        with torch.inference_mode():
-            model(input_ids=token_ids, past_key_values=kv_cache, use_cache=True, position_ids=position_ids)
+    print(f"Warming up ({args.warmup} steps{', compiling' if args.mode.startswith('compile') else ''})...")
+    with torch.inference_mode():
+        for i in range(args.warmup):
+            step(i)
     torch.cuda.synchronize()
 
     # ── Timed run ─────────────────────────────────────────────────────────
@@ -138,12 +179,11 @@ def main():
     end_event   = torch.cuda.Event(enable_timing=True)
 
     print("Running timed steps...")
-    start_event.record()
-    for i in range(n):
-        position_ids = torch.tensor([[start_pos + i]], device=device)
-        with torch.inference_mode():
-            model(input_ids=token_ids, past_key_values=kv_cache, use_cache=True, position_ids=position_ids)
-    end_event.record()
+    with torch.inference_mode():
+        start_event.record()
+        for i in range(n):
+            step(args.warmup + i)
+        end_event.record()
     torch.cuda.synchronize()
 
     elapsed_ms = start_event.elapsed_time(end_event)
@@ -155,19 +195,36 @@ def main():
     per_step_ms = elapsed_ms / n
 
     # ── Report ────────────────────────────────────────────────────────────
-    model_name = "HF Llama-3 8B" if not args.small else "HF Tiny (2-layer)"
+    model_name = "HF Llama-3.1 8B" if not args.small else "HF Tiny (2-layer)"
     print(f"\n{'─'*60}")
     print(f"  Model:            {model_name}")
     print(f"  Context length:   {args.seq_len} → {start_pos + n}")
     print(f"  Decode steps:     {n}")
     print(f"  Batch size:       {args.batch_size}")
     print(f"  Dtype:            {args.dtype}")
-    print(f"  Compiled:         {args.compiled}")
+    print(f"  Mode:             {args.mode}")
     print(f"{'─'*60}")
     print(f"  Total time:       {elapsed_ms:.2f} ms")
     print(f"  Per step:         {per_step_ms:.3f} ms/tok")
     print(f"  Throughput:       {tok_per_sec:.1f} tok/s")
-    print(f"{'─'*60}\n")
+    print(f"{'─'*60}")
+    if not args.no_log:
+        run_log.log_run({
+            "impl": "hf",
+            "mode": args.mode,
+            "model": "tiny" if args.small else "llama3.1-8b",
+            "seq_len": args.seq_len,
+            "kv_len": args.seq_len + n_pos if static else "",
+            "decode_steps": args.decode_steps,
+            "warmup": args.warmup,
+            "batch_size": args.batch_size,
+            "profiler_scopes": False,
+            "cuda_graphs": args.mode == "compile-cg",
+            "tok_s": round(tok_per_sec, 2),
+            "ms_per_tok": round(per_step_ms, 3),
+            "note": f"transformers {transformers.__version__}; {args.note}".rstrip("; "),
+        })
+    print()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small bench-context-sweep
 
 # Default target: show help message
 help:
@@ -30,8 +30,9 @@ help:
 	@echo "  make bench-throughput-small - Run throughput benchmark with a tiny 2-layer config"
 	@echo "  make bench-throughput-profiled - Throughput with record_function scopes on (slower, CPU-bound)"
 	@echo "  make bench-throughput-graphs - Throughput with decode steps replayed from a CUDA graph"
-	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3 8B defaults)"
+	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3.1 8B, eager DynamicCache)"
 	@echo "  make bench-throughput-hf-small - Run HF throughput benchmark with a tiny 2-layer config"
+	@echo "  make bench-context-sweep   - Decode tok/s vs context length (512 to 112K), ours vs HF"
 	@echo "======================================================================"
 
 # Run all tests
@@ -103,3 +104,6 @@ bench-throughput-hf:
 
 bench-throughput-hf-small:
 	python benchmarks/bench_throughput_hf.py --small
+
+bench-context-sweep:
+	python benchmarks/sweep_context.py
