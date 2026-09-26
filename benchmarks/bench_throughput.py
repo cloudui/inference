@@ -6,10 +6,19 @@ Usage:
 
 Measures wall-clock tok/s for single-token decode steps using CUDA event timing.
 KV cache is pre-filled with random data to simulate mid-sequence decoding.
+Each run is appended to benchmarks/results/throughput_runs.csv with the commit and
+environment (disable with --no-log).
 """
 
 import argparse
+import csv
+import datetime
+import platform
+import subprocess
+from pathlib import Path
+
 import torch
+import triton
 
 from model import Llama, LlamaConfig, set_profiling, profiling_enabled
 
@@ -28,7 +37,63 @@ def parse_args():
     p.add_argument("--profile-scopes", action="store_true",
                    help="Keep torch.profiler record_function scopes on (costs CPU time; "
                         "also enabled by INFERENCE_PROFILE=1)")
+    p.add_argument("--no-log",       action="store_true",
+                   help="Don't append this run to benchmarks/results/throughput_runs.csv")
+    p.add_argument("--note",         type=str, default="",
+                   help="Free-text note stored with the logged run")
     return p.parse_args()
+
+
+RUN_LOG = Path(__file__).resolve().parent / "results" / "throughput_runs.csv"
+
+
+def _git(*cmd):
+    try:
+        return subprocess.check_output(["git", *cmd], cwd=Path(__file__).resolve().parent, text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def _cpu_model():
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor()
+
+
+def log_run(args, tok_per_sec, per_step_ms):
+    """Append one row per run so throughput history survives pod resets."""
+    row = {
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "commit": _git("rev-parse", "--short", "HEAD"),
+        "dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
+        "model": "tiny" if args.small else "llama3-8b",
+        "seq_len": args.seq_len,
+        "decode_steps": args.decode_steps,
+        "warmup": args.warmup,
+        "batch_size": args.batch_size,
+        "profiler_scopes": profiling_enabled(),
+        "tok_s": round(tok_per_sec, 2),
+        "ms_per_tok": round(per_step_ms, 3),
+        "gpu": torch.cuda.get_device_name(),
+        "cpu": _cpu_model(),
+        "torch": torch.__version__,
+        "triton": triton.__version__,
+        "cuda": torch.version.cuda,
+        "note": args.note,
+    }
+    RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
+    new_file = not RUN_LOG.exists()
+    with open(RUN_LOG, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(row))
+        if new_file:
+            w.writeheader()
+        w.writerow(row)
+    print(f"  Logged to {RUN_LOG.relative_to(RUN_LOG.parents[2])}")
 
 
 def build_model(args):
@@ -137,7 +202,10 @@ def main():
     print(f"  Total time:       {elapsed_ms:.2f} ms")
     print(f"  Per step:         {per_step_ms:.3f} ms/tok")
     print(f"  Throughput:       {tok_per_sec:.1f} tok/s")
-    print(f"{'─'*60}\n")
+    print(f"{'─'*60}")
+    if not args.no_log:
+        log_run(args, tok_per_sec, per_step_ms)
+    print()
 
 
 if __name__ == "__main__":
