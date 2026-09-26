@@ -87,7 +87,7 @@ Before this sweep I expected the fixed 16 KV splits to hurt at long context: 16 
 
 ![kernel breakdown at 32K](long_context_breakdown_32k.png)
 
-GPU time per decode step at 32K, from `torch.profiler` (one step after warmup; raw data in `long_context_breakdown_32k.csv`):
+GPU time per decode step at 32K, from `torch.profiler` (one step after warmup; raw data in `long_context_breakdown_32k.csv`, script `harness/profile_breakdown_32k.py`):
 
 | | ours | HF DynamicCache | HF StaticCache |
 |---|---:|---:|---:|
@@ -166,7 +166,7 @@ vLLM 0.30.0 (torch 2.13, CUDA 13.0), Llama 3.1 8B config with random weights (`l
 
 **How it's timed.** vLLM can't be given a pre-filled KV cache, so each request sends a `seq_len`-token random prompt and vLLM prefills it for real (prefix caching off, so every request attends over its own context). The script drives the engine one `step()` at a time and averages only the decode steps after 30 warmup tokens: host wall clock per step, including sampling and returning the token. It takes the median of 3 requests after one discarded warmup request; the three agreed within 0.02 ms everywhere.
 
-That's not how `bench_throughput.py` times our engine. It uses CUDA events around 128 steps and never reads a token back, so the CPU can queue the next step while the GPU runs. For a like-for-like number, our engine was also run as a real generation loop (forward pass, greedy argmax, `.item()` to the host, feed the token back) and timed the same way.
+That's not how `bench_throughput.py` times our engine. It uses CUDA events around 128 steps and never reads a token back, so the CPU can queue the next step while the GPU runs. For a like-for-like number, our engine was also run as a real generation loop (forward pass, greedy argmax, `.item()` to the host, feed the token back) and timed the same way (`harness/generation_loop_walltime.py`).
 
 | context | ours, `bench_throughput.py` | ours, generation loop | vLLM | ours vs vLLM (loop vs vLLM) |
 |---:|---:|---:|---:|---:|

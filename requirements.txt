@@ -4,7 +4,7 @@ torch
 triton
 
 # HF
-transformers==11.5.0
+transformers==5.17.0  # version the perf_history results were measured with
 
 # benching
 flash-attn
@@ -13,3 +13,4 @@ flash-attn
 # CUDA
 # cuda12/13 
 
+matplotlib  # docs/perf_history charts only
