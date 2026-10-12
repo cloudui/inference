@@ -1,7 +1,7 @@
 # Makefile for High-Performance Inference Engine
 # Provides helper commands for running tests and benchmarks
 
-.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs test-rope test-swiglu benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small bench-context-sweep
+.PHONY: help test test-attention test-decode test-flash-decode test-flash-decode-gpu test-forward test-cuda-graphs test-rope test-swiglu benchmark benchmark-small benchmark-chrome benchmark-small-chrome benchmark-hf benchmark-hf-small benchmark-hf-chrome benchmark-hf-small-chrome bench-throughput bench-throughput-small bench-throughput-profiled bench-throughput-graphs bench-throughput-hf bench-throughput-hf-small bench-context-sweep bench-batch-sweep
 
 # Default target: show help message
 help:
@@ -34,6 +34,7 @@ help:
 	@echo "  make bench-throughput-hf   - Run HF throughput benchmark (Llama-3.1 8B, eager DynamicCache)"
 	@echo "  make bench-throughput-hf-small - Run HF throughput benchmark with a tiny 2-layer config"
 	@echo "  make bench-context-sweep   - Decode tok/s vs context length (512 to 112K), ours vs HF"
+	@echo "  make bench-batch-sweep     - Decode tok/s vs batch size (1 to 128), ours vs vLLM"
 	@echo "======================================================================"
 
 # Run all tests
@@ -111,3 +112,6 @@ bench-throughput-hf-small:
 
 bench-context-sweep:
 	python benchmarks/sweep_context.py
+
+bench-batch-sweep:
+	python benchmarks/sweep_batch.py

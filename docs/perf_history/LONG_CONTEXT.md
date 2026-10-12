@@ -200,7 +200,6 @@ That's not how `bench_throughput.py` times our engine. It uses CUDA events aroun
 
 ## Next
 
-- Beyond batch 1, where serving engines earn their keep: batched decode (fix the `swiglu_out` batch > 1 bug first), then compare against vLLM with continuous batching.
+- ~~Batched decode vs vLLM~~: done, see `BATCH.md` (within −0.7% to +1.6% of vLLM from batch 1 to 128). Next there: continuous batching with per-sequence positions.
 - Lower-precision weights and KV (FP8/INT4), which move the bandwidth ceiling itself.
 - HF with `attn_implementation="flash_attention_2"` (needs the `flash-attn` package).
-- Beyond batch 1: batching (fix the `swiglu_out` batch > 1 bug first) and lower-precision weights and KV. Those move the ceiling itself.

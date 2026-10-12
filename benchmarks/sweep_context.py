@@ -58,9 +58,9 @@ def bench_cmd(run: str, seq_len: int, args) -> list[str]:
     return [sys.executable, str(HERE / "bench_throughput_hf.py"), *common, "--mode", mode]
 
 
-def run_one(run: str, seq_len: int, args) -> float | str:
-    """ms/token, or a short failure label."""
-    proc = subprocess.run(bench_cmd(run, seq_len, args), capture_output=True, text=True)
+def run_one(run: str, seq_len: int, args, cmd: list[str] | None = None) -> float | str:
+    """ms/token (ms per step at batch > 1), or a short failure label."""
+    proc = subprocess.run(cmd or bench_cmd(run, seq_len, args), capture_output=True, text=True)
     m = re.search(r"Per step:\s+([\d.]+) ms/tok", proc.stdout)
     if proc.returncode == 0 and m:
         return float(m.group(1))

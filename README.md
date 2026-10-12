@@ -18,6 +18,9 @@ vLLM 0.30 at every context length up to 112K tokens, and 2.2x HF eager at 112K.
   is bytes: the KV cache grows to half of what each token reads.
 - **Level with vLLM 0.30 within 1%** at every context length from 512 to 111K tokens, timed
   the same way.
+- **Batched decode up to 3,643 tok/s** (batch 128, 512 context), within −0.7% to +1.6% of vLLM
+  from batch 1 to 128 after picking flash-decode's KV split count by batch size — see
+  [`docs/perf_history/BATCH.md`](docs/perf_history/BATCH.md).
 - **Fused Triton kernels**: RoPE + KV-cache write, split-K flash-decode, RMSNorm with a
   cross-layer residual-add fusion, and a fused gate/up SwiGLU — see
   [`docs/perf_history/OPTIMIZATIONS.md`](docs/perf_history/OPTIMIZATIONS.md) for what each
@@ -61,6 +64,9 @@ make bench-throughput-graphs        #     python benchmarks/bench_throughput.py 
 
 # tok/s vs. context length, 512 to 112K, ours vs. HF
 make bench-context-sweep            #     python benchmarks/sweep_context.py
+
+# tok/s vs. batch size, 1 to 128, ours vs. vLLM (vLLM in its own venv, see LONG_CONTEXT.md)
+make bench-batch-sweep              #     python benchmarks/sweep_batch.py
 ```
 
 `make help` lists every target, but most days it's just as easy to call the scripts in
@@ -85,3 +91,5 @@ docs/perf_history/     the performance write-ups linked above
   version, ranked by measured impact
 - [`docs/perf_history/LONG_CONTEXT.md`](docs/perf_history/LONG_CONTEXT.md) — Llama 3.1 RoPE
   scaling and the 512→112K sweep against HF and vLLM
+- [`docs/perf_history/BATCH.md`](docs/perf_history/BATCH.md) — batch 1→128 against vLLM and
+  the flash-decode split-count fix

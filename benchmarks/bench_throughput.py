@@ -4,7 +4,9 @@ bench_throughput.py — Decode tok/s benchmark for the custom Llama inference st
 Usage:
     python bench_throughput.py [--seq-len 512] [--decode-steps 128] [--small] [--batch-size 1]
 
-Measures wall-clock tok/s for single-token decode steps using CUDA event timing.
+Measures tok/s for single-token decode steps using CUDA event timing. With --generation-loop it
+instead times a real generation loop on the host clock, the way bench_throughput_vllm.py times
+vLLM: forward, greedy argmax, tokens to the host, argmax fed back as the next input.
 KV cache is pre-filled with random data to simulate mid-sequence decoding, and sized to
 the positions the run touches (seq_len + warmup + decode_steps), so long contexts fit.
 Each run is appended to benchmarks/results/throughput_runs.csv with the commit and
@@ -35,6 +37,9 @@ def parse_args():
                         "also enabled by INFERENCE_PROFILE=1)")
     p.add_argument("--cuda-graphs",  action="store_true",
                    help="Replay decode steps from a captured CUDA graph (model.enable_cuda_graphs())")
+    p.add_argument("--generation-loop", action="store_true",
+                   help="Time forward + argmax + token readback per step on the host clock "
+                        "(comparable to bench_throughput_vllm.py)")
     p.add_argument("--kv-len",       type=int, default=None,
                    help="KV cache rows to allocate (default: seq_len + warmup + decode_steps)")
     p.add_argument("--no-log",       action="store_true",
@@ -47,7 +52,7 @@ def parse_args():
 def log_run(args, kv_len, tok_per_sec, per_step_ms):
     run_log.log_run({
         "impl": "custom",
-        "mode": "cuda-graphs" if args.cuda_graphs else "eager",
+        "mode": ("cuda-graphs" if args.cuda_graphs else "eager") + ("+loop" if args.generation_loop else ""),
         "model": "tiny" if args.small else "llama3.1-8b",
         "seq_len": args.seq_len,
         "kv_len": kv_len,
@@ -111,6 +116,21 @@ def build_model(args):
     return model, kv_caches, cfg
 
 
+def time_generation_loop(model, kv_caches, args, start_pos: int) -> float:
+    """Mean host wall time (ms) per decode step, each step ending with the tokens on the host."""
+    import statistics, time
+    token_ids = torch.zeros(args.batch_size, 1, dtype=torch.long, device="cuda")
+    steps = []
+    for i in range(args.decode_steps):
+        t0 = time.perf_counter()
+        logits = model.forward(token_ids, start_pos=start_pos + i, kv_caches=kv_caches)
+        next_ids = logits[:, -1].argmax(dim=-1, keepdim=True)
+        next_ids.tolist()  # host sync: the tokens a server would stream back
+        token_ids.copy_(next_ids)
+        steps.append(time.perf_counter() - t0)
+    return statistics.mean(steps) * 1e3
+
+
 def main():
     args = parse_args()
     device = torch.device("cuda")
@@ -147,16 +167,19 @@ def main():
     start_pos = args.seq_len + args.warmup
     n = args.decode_steps
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event   = torch.cuda.Event(enable_timing=True)
+    if args.generation_loop:
+        elapsed_ms = time_generation_loop(model, kv_caches, args, start_pos) * n
+    else:
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event   = torch.cuda.Event(enable_timing=True)
 
-    start_event.record()
-    for i in range(n):
-        model.forward(token_ids, start_pos=start_pos + i, kv_caches=kv_caches)
-    end_event.record()
-    torch.cuda.synchronize()
+        start_event.record()
+        for i in range(n):
+            model.forward(token_ids, start_pos=start_pos + i, kv_caches=kv_caches)
+        end_event.record()
+        torch.cuda.synchronize()
 
-    elapsed_ms = start_event.elapsed_time(end_event)
+        elapsed_ms = start_event.elapsed_time(end_event)
     elapsed_s  = elapsed_ms / 1000.0
     total_tokens = n * args.batch_size
     tok_per_sec = total_tokens / elapsed_s

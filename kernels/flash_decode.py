@@ -138,7 +138,8 @@ def flash_decode_generation_kernel(
     acc = acc / den
     lse = lse_max + tl.log2(d_accum)
 
-    # Store intermediate accumulator (Mid_O)
+    # Store intermediate accumulator (Mid_O). With one split the host passes the final output
+    # as mid_o (same (gqa, head_dim) tile layout), so this is the result and no reduce follows.
     mid_o_start_ptr = mid_o_batch_ptr + pid_head * stride_mid_o_head + pid_kv * stride_mid_o_block
     mid_o_block_ptr = tl.make_block_ptr(
         base=mid_o_start_ptr,
@@ -150,17 +151,18 @@ def flash_decode_generation_kernel(
     )
     tl.store(mid_o_block_ptr, acc.to(tl.float16), boundary_check=(0, 1))
 
-    # Store intermediate LSE (Mid_LSE)
-    mid_lse_start_ptr = mid_lse_batch_ptr + pid_head * stride_mid_lse_head + pid_kv * stride_mid_lse_block
-    mid_lse_block_ptr = tl.make_block_ptr(
-        base=mid_lse_start_ptr,
-        shape=(gqa_ratio,),
-        strides=(stride_mid_lse_gqa,),
-        offsets=(0,),
-        block_shape=(BLOCK_GQA,),
-        order=(0,)
-    )
-    tl.store(mid_lse_block_ptr, lse, boundary_check=(0,))
+    # Store intermediate LSE (Mid_LSE); a single split has nothing to reduce
+    if NUM_SPLITS > 1:
+        mid_lse_start_ptr = mid_lse_batch_ptr + pid_head * stride_mid_lse_head + pid_kv * stride_mid_lse_block
+        mid_lse_block_ptr = tl.make_block_ptr(
+            base=mid_lse_start_ptr,
+            shape=(gqa_ratio,),
+            strides=(stride_mid_lse_gqa,),
+            offsets=(0,),
+            block_shape=(BLOCK_GQA,),
+            order=(0,)
+        )
+        tl.store(mid_lse_block_ptr, lse, boundary_check=(0,))
 
 
 @triton.jit
@@ -243,9 +245,23 @@ def flash_decode_reduce_kernel(
 # for using exp2/log2
 LOG2_E = 1.4426950408889634
 
+# KV splits per (batch, KV head), by batch size. Splitting only pays while batch x 8 KV heads
+# leaves the GPU's 82 SMs underfed; once it doesn't, every extra split writes and re-reads
+# partial results and adds the reduce launch (up to +17% at 512 context, batch 128). Measured
+# kernel-only at 512/4K/32K context, docs/perf_history/BATCH.md.
+def default_num_splits(batch_size: int) -> int:
+    if batch_size == 1:
+        return 16
+    if batch_size == 2:
+        return 4
+    if batch_size < 8:
+        return 2
+    return 1
+
+
 def flash_decode_out(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int | torch.Tensor,
-    mid_o: torch.Tensor, mid_lse: torch.Tensor, out: torch.Tensor,
+    mid_o: torch.Tensor | None, mid_lse: torch.Tensor | None, out: torch.Tensor,
     num_splits: int = 16
 ) -> None:
     """Computes Grouped-Query Attention (GQA) using a Split-KV flash decoding approach.
@@ -253,6 +269,8 @@ def flash_decode_out(
 
     seq_len may be a Python int or a 1-element int32 device tensor. The grid is fixed at
     num_splits and seq_len is read on the GPU, so the launch is CUDA-graph replayable.
+    With num_splits=1 the generation kernel writes `out` directly: mid_o/mid_lse are unused
+    and there is no reduce launch.
     """
     if not isinstance(seq_len, torch.Tensor):
         seq_len = torch.tensor([seq_len], dtype=torch.int32, device=q.device)
@@ -268,8 +286,16 @@ def flash_decode_out(
     stride_q_batch, stride_q_head, _, _ = q.stride()
     stride_k_batch, stride_k_head, stride_k_seq, _ = k.stride()
     
-    stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
-    stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
+    if num_splits == 1:
+        # out viewed as mid_o: (batch, kv head, split, gqa, head_dim), the gqa q heads of a KV head
+        # being consecutive rows of out
+        mid_o, mid_lse = out, out
+        stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa = \
+            out.stride(0), gqa_ratio * out.stride(1), 0, out.stride(1)
+        stride_mid_lse_batch = stride_mid_lse_head = stride_mid_lse_block = stride_mid_lse_gqa = 0
+    else:
+        stride_mid_o_batch, stride_mid_o_head, stride_mid_o_block, stride_mid_o_gqa, _ = mid_o.stride()
+        stride_mid_lse_batch, stride_mid_lse_head, stride_mid_lse_block, stride_mid_lse_gqa = mid_lse.stride()
     
     # # Reset intermediate lse buffer to float("-inf") for reduction kernel
     # mid_lse.fill_(float("-inf"))
@@ -304,6 +330,9 @@ def flash_decode_out(
         NUM_SPLITS=num_splits,
     )
     
+    if num_splits == 1:
+        return
+
     # Launch Reduction Kernel
     grid_reduce = (q_heads, batch_size)
     stride_out_batch, stride_out_head, _, _ = out.stride()
@@ -330,14 +359,20 @@ def flash_decode_out(
 
 def flash_decode(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, seq_len: int | torch.Tensor,
-    num_splits: int = 16
+    num_splits: int | None = None
 ) -> torch.Tensor:
+    """num_splits: KV splits per (batch, KV head); default picks by batch size."""
     batch_size = q.shape[0]
     q_heads = q.shape[1]
     _, k_heads, _, head_dim = k.shape
-    
+
     gqa_ratio = q_heads // k_heads
-    
+    num_splits = num_splits or default_num_splits(batch_size)
+    out = torch.empty((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
+    if num_splits == 1:
+        flash_decode_out(q, k, v, seq_len, None, None, out, num_splits=1)
+        return out
+
     mid_o = torch.empty(
         (batch_size, k_heads, num_splits, gqa_ratio, head_dim), 
         device=q.device, 
@@ -348,7 +383,6 @@ def flash_decode(
         device=q.device, 
         dtype=torch.float32
     )
-    out = torch.empty((batch_size, q_heads, 1, head_dim), device=q.device, dtype=torch.float16)
-    
+
     flash_decode_out(q, k, v, seq_len, mid_o, mid_lse, out, num_splits=num_splits)
     return out

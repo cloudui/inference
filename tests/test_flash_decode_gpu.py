@@ -63,8 +63,8 @@ def run_gpu_sanity_check():
     k_heads = 8
     head_dim = 128
 
-    seq_lens = [128, 512, 2048, 4096, 8192]
-    num_splits_list = [4, 8, 16, 32]
+    seq_lens = [128, 512, 1000, 2048, 4096, 8192]
+    num_splits_list = [1, 2, 4, 8, 16, 32]
 
     all_passed = True
 

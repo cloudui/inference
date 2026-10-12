@@ -267,7 +267,7 @@ In the frozen per-commit benchmark (`harness/bench_fixed.py --cuda-graphs`, now 
 
 `tests/test_cuda_graphs.py` checks graph replay against eager decode for 100 steps across KV block boundaries.
 
-Batch > 1 is excluded from that test because of a pre-existing bug on `main`: `swiglu_out` calls `.view(-1)` on the non-contiguous halves of the fused `gate_up` buffer. It needs fixing before larger batches are benchmarked.
+Batch > 1 was at first excluded from that test because of a bug: `swiglu_out` called `.view(-1)` on the non-contiguous halves of the fused `gate_up` buffer. `b0b0935` fixed it, and the test now also runs batch 3. Batched decode against vLLM is in `BATCH.md`.
 
 ## Follow-up: long context and Llama 3.1 RoPE (2026-09-26)
 

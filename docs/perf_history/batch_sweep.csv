@@ -1,0 +1,66 @@
+engine_version,context,batch,run,ms_per_step,tok_s,bandwidth_floor_ms
+baseline,512,1,custom:cuda-graphs,19.025,52.6,18.401
+baseline,512,1,custom:cuda-graphs+loop,19.216,52.0,18.401
+vllm 0.30.0,512,1,vllm:default,19.178,52.1,18.401
+baseline,512,2,custom:cuda-graphs,19.112,104.6,18.497
+baseline,512,2,custom:cuda-graphs+loop,19.297,103.6,18.497
+vllm 0.30.0,512,2,vllm:default,19.492,102.6,18.497
+baseline,512,4,custom:cuda-graphs,19.361,206.6,18.691
+baseline,512,4,custom:cuda-graphs+loop,19.554,204.6,18.691
+vllm 0.30.0,512,4,vllm:default,19.751,202.5,18.691
+baseline,512,8,custom:cuda-graphs,19.85,403.0,19.079
+baseline,512,8,custom:cuda-graphs+loop,20.049,399.0,19.079
+vllm 0.30.0,512,8,vllm:default,20.169,396.6,19.079
+baseline,512,16,custom:cuda-graphs,20.865,766.8,19.854
+baseline,512,16,custom:cuda-graphs+loop,21.062,759.7,19.854
+vllm 0.30.0,512,16,vllm:default,21.224,753.9,19.854
+baseline,512,32,custom:cuda-graphs,22.982,1392.4,21.403
+baseline,512,32,custom:cuda-graphs+loop,23.068,1387.2,21.403
+vllm 0.30.0,512,32,vllm:default,22.862,1399.7,21.403
+baseline,512,64,custom:cuda-graphs,27.024,2368.3,24.503
+baseline,512,64,custom:cuda-graphs+loop,27.107,2361.0,24.503
+vllm 0.30.0,512,64,vllm:default,26.95,2374.8,24.503
+baseline,512,128,custom:cuda-graphs,35.989,3556.6,30.702
+baseline,512,128,custom:cuda-graphs+loop,36.084,3547.3,30.702
+vllm 0.30.0,512,128,vllm:default,34.87,3670.8,30.702
+baseline,4096,1,custom:cuda-graphs,19.642,50.9,18.973
+baseline,4096,1,custom:cuda-graphs+loop,19.808,50.5,18.973
+vllm 0.30.0,4096,1,vllm:default,19.813,50.5,18.973
+baseline,4096,2,custom:cuda-graphs,20.255,98.7,19.643
+baseline,4096,2,custom:cuda-graphs+loop,20.45,97.8,19.643
+vllm 0.30.0,4096,2,vllm:default,20.7,96.6,19.643
+baseline,4096,4,custom:cuda-graphs,21.636,184.9,20.983
+baseline,4096,4,custom:cuda-graphs+loop,21.836,183.2,20.983
+vllm 0.30.0,4096,4,vllm:default,22.045,181.4,20.983
+baseline,4096,8,custom:cuda-graphs,24.446,327.3,23.662
+baseline,4096,8,custom:cuda-graphs+loop,24.614,325.0,23.662
+vllm 0.30.0,4096,8,vllm:default,24.849,321.9,23.662
+baseline,4096,16,custom:cuda-graphs,30.062,532.2,29.02
+baseline,4096,16,custom:cuda-graphs+loop,30.193,529.9,29.02
+vllm 0.30.0,4096,16,vllm:default,30.404,526.2,29.02
+adaptive-splits,512,1,custom:cuda-graphs,19.041,52.5,18.401
+adaptive-splits,512,1,custom:cuda-graphs+loop,19.224,52.0,18.401
+adaptive-splits,512,2,custom:cuda-graphs,19.079,104.8,18.497
+adaptive-splits,512,2,custom:cuda-graphs+loop,19.274,103.8,18.497
+adaptive-splits,512,4,custom:cuda-graphs,19.315,207.1,18.691
+adaptive-splits,512,4,custom:cuda-graphs+loop,19.505,205.1,18.691
+adaptive-splits,512,8,custom:cuda-graphs,19.847,403.1,19.079
+adaptive-splits,512,8,custom:cuda-graphs+loop,19.948,401.0,19.079
+adaptive-splits,512,16,custom:cuda-graphs,20.797,769.3,19.854
+adaptive-splits,512,16,custom:cuda-graphs+loop,20.892,765.8,19.854
+adaptive-splits,512,32,custom:cuda-graphs,22.675,1411.2,21.403
+adaptive-splits,512,32,custom:cuda-graphs+loop,22.762,1405.9,21.403
+adaptive-splits,512,64,custom:cuda-graphs,26.575,2408.3,24.503
+adaptive-splits,512,64,custom:cuda-graphs+loop,26.657,2400.9,24.503
+adaptive-splits,512,128,custom:cuda-graphs,35.021,3654.9,30.702
+adaptive-splits,512,128,custom:cuda-graphs+loop,35.132,3643.4,30.702
+adaptive-splits,4096,1,custom:cuda-graphs,19.665,50.9,18.973
+adaptive-splits,4096,1,custom:cuda-graphs+loop,19.794,50.5,18.973
+adaptive-splits,4096,2,custom:cuda-graphs,20.236,98.8,19.643
+adaptive-splits,4096,2,custom:cuda-graphs+loop,20.439,97.9,19.643
+adaptive-splits,4096,4,custom:cuda-graphs,21.608,185.1,20.983
+adaptive-splits,4096,4,custom:cuda-graphs+loop,21.801,183.5,20.983
+adaptive-splits,4096,8,custom:cuda-graphs,24.405,327.8,23.662
+adaptive-splits,4096,8,custom:cuda-graphs+loop,24.503,326.5,23.662
+adaptive-splits,4096,16,custom:cuda-graphs,29.89,535.3,29.02
+adaptive-splits,4096,16,custom:cuda-graphs+loop,29.976,533.8,29.02
