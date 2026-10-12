@@ -1,0 +1,979 @@
+mode,start_us,end_us,op,kernel
+cuda-graphs,37.615,38.607,other,vectorized_elementwise_kernel
+cuda-graphs,163.12,168.4,other,index_elementwise_kernel
+cuda-graphs,169.2,170.576,rmsnorm,rmsnorm_kernel
+cuda-graphs,171.088,233.905,qkv_proj,cublas gemv
+cuda-graphs,234.417,235.281,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,235.793,240.209,flash_decode,flash_decode_generation_kernel
+cuda-graphs,240.689,242.097,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,242.609,285.393,out_proj,cublas gemv
+cuda-graphs,285.873,287.185,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,287.665,572.628,gate_up_proj,cublas gemv
+cuda-graphs,573.108,573.748,swiglu,swiglu_kernel
+cuda-graphs,574.26,721.75,down_proj,cublas gemv
+cuda-graphs,722.262,723.574,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,724.086,786.55,qkv_proj,cublas gemv
+cuda-graphs,787.03,787.702,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,788.182,792.534,flash_decode,flash_decode_generation_kernel
+cuda-graphs,793.046,794.358,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,794.902,837.623,out_proj,cublas gemv
+cuda-graphs,838.103,839.415,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,839.895,1125.146,gate_up_proj,cublas gemv
+cuda-graphs,1125.626,1126.266,swiglu,swiglu_kernel
+cuda-graphs,1126.746,1274.619,down_proj,cublas gemv
+cuda-graphs,1275.131,1276.475,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,1276.987,1339.932,qkv_proj,cublas gemv
+cuda-graphs,1340.444,1341.116,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,1341.628,1346.012,flash_decode,flash_decode_generation_kernel
+cuda-graphs,1346.492,1347.804,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,1348.316,1390.652,out_proj,cublas gemv
+cuda-graphs,1391.132,1392.444,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,1392.924,1678.335,gate_up_proj,cublas gemv
+cuda-graphs,1678.879,1679.487,swiglu,swiglu_kernel
+cuda-graphs,1679.999,1827.969,down_proj,cublas gemv
+cuda-graphs,1828.481,1829.793,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,1830.337,1893.313,qkv_proj,cublas gemv
+cuda-graphs,1893.793,1894.465,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,1895.009,1899.361,flash_decode,flash_decode_generation_kernel
+cuda-graphs,1899.841,1901.185,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,1901.665,1944.194,out_proj,cublas gemv
+cuda-graphs,1944.674,1946.05,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,1946.562,2231.653,gate_up_proj,cublas gemv
+cuda-graphs,2232.133,2232.773,swiglu,swiglu_kernel
+cuda-graphs,2233.253,2380.646,down_proj,cublas gemv
+cuda-graphs,2381.126,2382.566,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,2383.046,2446.087,qkv_proj,cublas gemv
+cuda-graphs,2446.567,2447.271,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,2447.751,2452.391,flash_decode,flash_decode_generation_kernel
+cuda-graphs,2452.871,2454.215,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,2454.663,2497.991,out_proj,cublas gemv
+cuda-graphs,2498.471,2499.815,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,2500.295,2785.482,gate_up_proj,cublas gemv
+cuda-graphs,2785.962,2786.57,swiglu,swiglu_kernel
+cuda-graphs,2787.082,2935.212,down_proj,cublas gemv
+cuda-graphs,2935.692,2937.036,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,2937.548,3000.492,qkv_proj,cublas gemv
+cuda-graphs,3000.972,3001.644,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,3002.124,3006.476,flash_decode,flash_decode_generation_kernel
+cuda-graphs,3006.988,3008.3,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,3008.812,3051.501,out_proj,cublas gemv
+cuda-graphs,3051.981,3053.293,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,3053.773,3338.896,gate_up_proj,cublas gemv
+cuda-graphs,3339.376,3340.016,swiglu,swiglu_kernel
+cuda-graphs,3340.496,3487.217,down_proj,cublas gemv
+cuda-graphs,3487.697,3489.041,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,3489.553,3552.466,qkv_proj,cublas gemv
+cuda-graphs,3552.978,3553.65,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,3554.13,3558.802,flash_decode,flash_decode_generation_kernel
+cuda-graphs,3559.282,3560.626,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,3561.106,3604.05,out_proj,cublas gemv
+cuda-graphs,3604.562,3605.874,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,3606.386,3893.813,gate_up_proj,cublas gemv
+cuda-graphs,3894.325,3894.965,swiglu,swiglu_kernel
+cuda-graphs,3895.477,4042.103,down_proj,cublas gemv
+cuda-graphs,4042.711,4044.055,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,4044.599,4107.703,qkv_proj,cublas gemv
+cuda-graphs,4108.151,4108.823,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,4109.335,4113.975,flash_decode,flash_decode_generation_kernel
+cuda-graphs,4114.455,4115.799,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,4116.279,4159.192,out_proj,cublas gemv
+cuda-graphs,4159.768,4161.08,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,4161.624,4446.363,gate_up_proj,cublas gemv
+cuda-graphs,4446.843,4447.483,swiglu,swiglu_kernel
+cuda-graphs,4447.963,4596.092,down_proj,cublas gemv
+cuda-graphs,4596.604,4597.916,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,4598.428,4661.309,qkv_proj,cublas gemv
+cuda-graphs,4661.821,4662.493,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,4663.005,4667.357,flash_decode,flash_decode_generation_kernel
+cuda-graphs,4667.837,4669.181,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,4669.789,4712.349,out_proj,cublas gemv
+cuda-graphs,4712.861,4714.173,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,4714.653,4999.84,gate_up_proj,cublas gemv
+cuda-graphs,5000.512,5001.12,swiglu,swiglu_kernel
+cuda-graphs,5001.632,5149.57,down_proj,cublas gemv
+cuda-graphs,5150.082,5151.394,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,5151.906,5214.882,qkv_proj,cublas gemv
+cuda-graphs,5215.362,5216.034,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,5216.482,5221.122,flash_decode,flash_decode_generation_kernel
+cuda-graphs,5221.634,5222.946,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,5223.458,5266.787,out_proj,cublas gemv
+cuda-graphs,5267.267,5268.643,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,5269.091,5554.118,gate_up_proj,cublas gemv
+cuda-graphs,5554.598,5555.206,swiglu,swiglu_kernel
+cuda-graphs,5555.686,5703.399,down_proj,cublas gemv
+cuda-graphs,5703.911,5705.255,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,5705.767,5768.808,qkv_proj,cublas gemv
+cuda-graphs,5769.288,5769.992,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,5770.504,5774.856,flash_decode,flash_decode_generation_kernel
+cuda-graphs,5775.368,5776.68,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,5777.16,5819.976,out_proj,cublas gemv
+cuda-graphs,5820.424,5821.736,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,5822.216,6107.467,gate_up_proj,cublas gemv
+cuda-graphs,6107.947,6108.587,swiglu,swiglu_kernel
+cuda-graphs,6109.163,6257.133,down_proj,cublas gemv
+cuda-graphs,6257.613,6258.957,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,6259.437,6322.445,qkv_proj,cublas gemv
+cuda-graphs,6322.957,6323.597,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,6324.109,6328.493,flash_decode,flash_decode_generation_kernel
+cuda-graphs,6329.005,6330.349,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,6330.829,6374.03,out_proj,cublas gemv
+cuda-graphs,6374.478,6375.79,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,6376.302,6662.001,gate_up_proj,cublas gemv
+cuda-graphs,6662.481,6663.153,swiglu,swiglu_kernel
+cuda-graphs,6663.601,6810.578,down_proj,cublas gemv
+cuda-graphs,6811.09,6812.402,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,6812.914,6876.147,qkv_proj,cublas gemv
+cuda-graphs,6876.627,6877.299,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,6877.779,6882.323,flash_decode,flash_decode_generation_kernel
+cuda-graphs,6882.803,6884.147,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,6884.627,6927.603,out_proj,cublas gemv
+cuda-graphs,6928.083,6929.395,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,6929.875,7215.19,gate_up_proj,cublas gemv
+cuda-graphs,7215.67,7216.31,swiglu,swiglu_kernel
+cuda-graphs,7216.822,7364.984,down_proj,cublas gemv
+cuda-graphs,7365.496,7366.84,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,7367.352,7430.584,qkv_proj,cublas gemv
+cuda-graphs,7431.064,7431.736,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,7432.216,7436.632,flash_decode,flash_decode_generation_kernel
+cuda-graphs,7437.112,7438.425,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,7438.905,7481.497,out_proj,cublas gemv
+cuda-graphs,7482.009,7483.289,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,7483.801,7768.86,gate_up_proj,cublas gemv
+cuda-graphs,7769.436,7770.076,swiglu,swiglu_kernel
+cuda-graphs,7770.556,7917.405,down_proj,cublas gemv
+cuda-graphs,7917.885,7919.197,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,7919.677,7982.686,qkv_proj,cublas gemv
+cuda-graphs,7983.198,7983.87,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,7984.35,7988.702,flash_decode,flash_decode_generation_kernel
+cuda-graphs,7989.214,7990.526,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,7991.006,8034.014,out_proj,cublas gemv
+cuda-graphs,8034.494,8035.806,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,8036.254,8321.569,gate_up_proj,cublas gemv
+cuda-graphs,8322.081,8322.689,swiglu,swiglu_kernel
+cuda-graphs,8323.201,8471.075,down_proj,cublas gemv
+cuda-graphs,8471.555,8472.867,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,8473.379,8536.675,qkv_proj,cublas gemv
+cuda-graphs,8537.155,8537.795,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,8538.307,8542.596,flash_decode,flash_decode_generation_kernel
+cuda-graphs,8543.108,8544.42,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,8544.932,8587.876,out_proj,cublas gemv
+cuda-graphs,8588.356,8589.7,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,8590.212,8875.175,gate_up_proj,cublas gemv
+cuda-graphs,8875.655,8876.295,swiglu,swiglu_kernel
+cuda-graphs,8876.775,9024.072,down_proj,cublas gemv
+cuda-graphs,9024.584,9025.928,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,9026.44,9089.321,qkv_proj,cublas gemv
+cuda-graphs,9089.801,9090.473,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,9090.953,9095.305,flash_decode,flash_decode_generation_kernel
+cuda-graphs,9095.785,9097.097,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,9097.577,9140.617,out_proj,cublas gemv
+cuda-graphs,9141.097,9142.441,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,9142.921,9428.044,gate_up_proj,cublas gemv
+cuda-graphs,9428.556,9429.164,swiglu,swiglu_kernel
+cuda-graphs,9429.676,9577.454,down_proj,cublas gemv
+cuda-graphs,9577.966,9579.374,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,9579.886,9643.054,qkv_proj,cublas gemv
+cuda-graphs,9643.534,9644.206,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,9644.654,9649.295,flash_decode,flash_decode_generation_kernel
+cuda-graphs,9649.807,9651.119,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,9651.599,9694.383,out_proj,cublas gemv
+cuda-graphs,9694.863,9696.239,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,9696.719,9981.714,gate_up_proj,cublas gemv
+cuda-graphs,9982.194,9982.834,swiglu,swiglu_kernel
+cuda-graphs,9983.314,10130.387,down_proj,cublas gemv
+cuda-graphs,10130.867,10132.211,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,10132.723,10195.604,qkv_proj,cublas gemv
+cuda-graphs,10196.116,10196.756,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,10197.268,10201.652,flash_decode,flash_decode_generation_kernel
+cuda-graphs,10202.228,10203.572,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,10204.18,10247.124,out_proj,cublas gemv
+cuda-graphs,10247.668,10248.981,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,10249.557,10534.935,gate_up_proj,cublas gemv
+cuda-graphs,10535.415,10536.055,swiglu,swiglu_kernel
+cuda-graphs,10536.567,10684.313,down_proj,cublas gemv
+cuda-graphs,10684.825,10686.361,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,10686.873,10749.754,qkv_proj,cublas gemv
+cuda-graphs,10750.234,10750.906,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,10751.386,10755.706,flash_decode,flash_decode_generation_kernel
+cuda-graphs,10756.218,10757.53,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,10758.01,10800.826,out_proj,cublas gemv
+cuda-graphs,10801.338,10802.682,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,10803.226,11088.381,gate_up_proj,cublas gemv
+cuda-graphs,11088.861,11089.501,swiglu,swiglu_kernel
+cuda-graphs,11089.981,11238.654,down_proj,cublas gemv
+cuda-graphs,11239.166,11240.478,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,11240.958,11304.127,qkv_proj,cublas gemv
+cuda-graphs,11304.607,11305.279,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,11305.759,11310.303,flash_decode,flash_decode_generation_kernel
+cuda-graphs,11310.815,11312.127,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,11312.639,11355.456,out_proj,cublas gemv
+cuda-graphs,11355.936,11357.248,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,11357.728,11643.042,gate_up_proj,cublas gemv
+cuda-graphs,11643.586,11644.226,swiglu,swiglu_kernel
+cuda-graphs,11644.706,11792.644,down_proj,cublas gemv
+cuda-graphs,11793.124,11794.436,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,11794.948,11858.053,qkv_proj,cublas gemv
+cuda-graphs,11858.533,11859.173,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,11859.653,11863.941,flash_decode,flash_decode_generation_kernel
+cuda-graphs,11864.421,11865.733,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,11866.245,11908.933,out_proj,cublas gemv
+cuda-graphs,11909.413,11910.725,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,11911.205,12196.392,gate_up_proj,cublas gemv
+cuda-graphs,12196.872,12197.544,swiglu,swiglu_kernel
+cuda-graphs,12198.024,12345.609,down_proj,cublas gemv
+cuda-graphs,12346.121,12347.465,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,12348.105,12410.89,qkv_proj,cublas gemv
+cuda-graphs,12411.37,12412.042,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,12412.554,12417.194,flash_decode,flash_decode_generation_kernel
+cuda-graphs,12417.706,12419.018,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,12419.498,12462.251,out_proj,cublas gemv
+cuda-graphs,12462.731,12464.011,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,12464.491,12749.741,gate_up_proj,cublas gemv
+cuda-graphs,12750.221,12750.861,swiglu,swiglu_kernel
+cuda-graphs,12751.373,12898.927,down_proj,cublas gemv
+cuda-graphs,12899.439,12900.751,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,12901.263,12964.336,qkv_proj,cublas gemv
+cuda-graphs,12964.816,12965.488,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,12965.968,12970.288,flash_decode,flash_decode_generation_kernel
+cuda-graphs,12970.768,12972.08,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,12972.56,13015.248,out_proj,cublas gemv
+cuda-graphs,13015.728,13017.104,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,13017.584,13302.643,gate_up_proj,cublas gemv
+cuda-graphs,13303.123,13303.731,swiglu,swiglu_kernel
+cuda-graphs,13304.211,13452.212,down_proj,cublas gemv
+cuda-graphs,13452.724,13454.036,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,13454.516,13517.429,qkv_proj,cublas gemv
+cuda-graphs,13517.941,13518.613,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,13519.093,13523.445,flash_decode,flash_decode_generation_kernel
+cuda-graphs,13523.957,13525.269,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,13525.749,13568.95,out_proj,cublas gemv
+cuda-graphs,13569.43,13570.742,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,13571.222,13856.28,gate_up_proj,cublas gemv
+cuda-graphs,13856.76,13857.4,swiglu,swiglu_kernel
+cuda-graphs,13857.88,14005.658,down_proj,cublas gemv
+cuda-graphs,14006.17,14007.482,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,14007.994,14071.291,qkv_proj,cublas gemv
+cuda-graphs,14071.771,14072.443,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,14072.955,14077.307,flash_decode,flash_decode_generation_kernel
+cuda-graphs,14077.595,14078.939,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,14079.227,14121.979,out_proj,cublas gemv
+cuda-graphs,14122.267,14123.611,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,14123.899,14408.862,gate_up_proj,cublas gemv
+cuda-graphs,14409.374,14410.014,swiglu,swiglu_kernel
+cuda-graphs,14410.494,14558.111,down_proj,cublas gemv
+cuda-graphs,14558.591,14559.903,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,14560.383,14622.944,qkv_proj,cublas gemv
+cuda-graphs,14623.392,14624.096,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,14624.576,14628.896,flash_decode,flash_decode_generation_kernel
+cuda-graphs,14629.408,14630.688,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,14631.2,14674.177,out_proj,cublas gemv
+cuda-graphs,14674.657,14676.001,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,14676.513,14961.571,gate_up_proj,cublas gemv
+cuda-graphs,14962.083,14962.691,swiglu,swiglu_kernel
+cuda-graphs,14963.203,15109.829,down_proj,cublas gemv
+cuda-graphs,15110.309,15111.621,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,15112.133,15175.27,qkv_proj,cublas gemv
+cuda-graphs,15175.846,15176.518,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,15176.998,15181.35,flash_decode,flash_decode_generation_kernel
+cuda-graphs,15181.83,15183.142,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,15183.622,15226.118,out_proj,cublas gemv
+cuda-graphs,15226.598,15227.974,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,15228.454,15513.705,gate_up_proj,cublas gemv
+cuda-graphs,15514.217,15514.857,swiglu,swiglu_kernel
+cuda-graphs,15515.337,15662.506,down_proj,cublas gemv
+cuda-graphs,15663.146,15664.458,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,15664.97,15727.691,qkv_proj,cublas gemv
+cuda-graphs,15728.139,15728.811,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,15729.291,15733.579,flash_decode,flash_decode_generation_kernel
+cuda-graphs,15734.123,15735.435,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,15735.915,15779.052,out_proj,cublas gemv
+cuda-graphs,15779.532,15780.812,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,15781.324,16066.222,gate_up_proj,cublas gemv
+cuda-graphs,16066.702,16067.343,swiglu,swiglu_kernel
+cuda-graphs,16067.823,16216.464,down_proj,cublas gemv
+cuda-graphs,16216.976,16218.288,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,16218.8,16281.937,qkv_proj,cublas gemv
+cuda-graphs,16282.385,16283.057,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,16283.537,16288.177,flash_decode,flash_decode_generation_kernel
+cuda-graphs,16288.657,16290.001,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,16290.481,16333.265,out_proj,cublas gemv
+cuda-graphs,16333.905,16335.249,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,16335.761,16620.724,gate_up_proj,cublas gemv
+cuda-graphs,16621.204,16621.844,swiglu,swiglu_kernel
+cuda-graphs,16622.356,16769.557,down_proj,cublas gemv
+cuda-graphs,16770.038,16771.35,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,16771.83,16834.518,qkv_proj,cublas gemv
+cuda-graphs,16834.998,16835.702,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,16836.214,16840.534,flash_decode,flash_decode_generation_kernel
+cuda-graphs,16841.046,16842.326,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,16842.838,16885.879,out_proj,cublas gemv
+cuda-graphs,16886.359,16887.703,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,16888.183,17173.274,gate_up_proj,cublas gemv
+cuda-graphs,17173.786,17174.426,swiglu,swiglu_kernel
+cuda-graphs,17174.938,17322.459,down_proj,cublas gemv
+cuda-graphs,17322.939,17324.283,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,17324.763,17387.644,qkv_proj,cublas gemv
+cuda-graphs,17388.124,17388.764,rope_kv_write,fused_rope_cache_kernel
+cuda-graphs,17389.244,17393.916,flash_decode,flash_decode_generation_kernel
+cuda-graphs,17394.428,17395.74,flash_decode,flash_decode_reduce_kernel
+cuda-graphs,17396.252,17439.324,out_proj,cublas gemv
+cuda-graphs,17439.804,17441.148,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,17441.66,17727.167,gate_up_proj,cublas gemv
+cuda-graphs,17727.679,17728.319,swiglu,swiglu_kernel
+cuda-graphs,17728.799,17876.769,down_proj,cublas gemv
+cuda-graphs,17877.249,17878.561,rmsnorm,fused_add_rmsnorm_kernel
+cuda-graphs,17879.041,19160.845,lm_head,cublas gemv
+cuda-graphs,19162.413,19183.31,other,reduce_kernel
+cuda-graphs,0,19216.045,STEP (nvtx range),decode step 2 (batch 1)
+eager,39.592,40.52,other,vectorized_elementwise_kernel
+eager,76.712,80.072,other,index_elementwise_kernel
+eager,177.993,179.209,rmsnorm,rmsnorm_kernel
+eager,227.401,289.962,qkv_proj,cublas gemv
+eager,312.458,313.418,rope_kv_write,fused_rope_cache_kernel
+eager,447.403,452.107,flash_decode,flash_decode_generation_kernel
+eager,507.564,509.004,flash_decode,flash_decode_reduce_kernel
+eager,563.82,606.765,out_proj,cublas gemv
+eager,639.469,641.037,rmsnorm,fused_add_rmsnorm_kernel
+eager,680.845,966.096,gate_up_proj,cublas gemv
+eager,968.176,968.944,swiglu,swiglu_kernel
+eager,969.488,1117.137,down_proj,cublas gemv
+eager,1117.713,1119.089,rmsnorm,fused_add_rmsnorm_kernel
+eager,1119.729,1182.546,qkv_proj,cublas gemv
+eager,1183.218,1183.986,rope_kv_write,fused_rope_cache_kernel
+eager,1185.266,1190.61,flash_decode,flash_decode_generation_kernel
+eager,1203.602,1205.01,flash_decode,flash_decode_reduce_kernel
+eager,1257.235,1299.923,out_proj,cublas gemv
+eager,1330.419,1331.827,rmsnorm,fused_add_rmsnorm_kernel
+eager,1370.644,1655.894,gate_up_proj,cublas gemv
+eager,1658.358,1658.998,swiglu,swiglu_kernel
+eager,1659.67,1807.384,down_proj,cublas gemv
+eager,1809.944,1811.352,rmsnorm,fused_add_rmsnorm_kernel
+eager,1811.992,1874.584,qkv_proj,cublas gemv
+eager,1875.448,1876.184,rope_kv_write,fused_rope_cache_kernel
+eager,1876.728,1881.656,flash_decode,flash_decode_generation_kernel
+eager,1918.393,1919.737,flash_decode,flash_decode_reduce_kernel
+eager,1981.241,2023.706,out_proj,cublas gemv
+eager,2054.074,2055.482,rmsnorm,fused_add_rmsnorm_kernel
+eager,2088.154,2373.213,gate_up_proj,cublas gemv
+eager,2374.173,2374.813,swiglu,swiglu_kernel
+eager,2375.453,2523.262,down_proj,cublas gemv
+eager,2525.726,2527.23,rmsnorm,fused_add_rmsnorm_kernel
+eager,2527.838,2590.943,qkv_proj,cublas gemv
+eager,2593.279,2594.047,rope_kv_write,fused_rope_cache_kernel
+eager,2595.327,2600.191,flash_decode,flash_decode_generation_kernel
+eager,2601.503,2602.911,flash_decode,flash_decode_reduce_kernel
+eager,2603.519,2646.367,out_proj,cublas gemv
+eager,2647.551,2648.895,rmsnorm,fused_add_rmsnorm_kernel
+eager,2662.591,2947.682,gate_up_proj,cublas gemv
+eager,2948.61,2949.218,swiglu,swiglu_kernel
+eager,2950.658,3099.203,down_proj,cublas gemv
+eager,3100.195,3101.635,rmsnorm,fused_add_rmsnorm_kernel
+eager,3102.243,3165.604,qkv_proj,cublas gemv
+eager,3167.748,3168.516,rope_kv_write,fused_rope_cache_kernel
+eager,3169.796,3174.948,flash_decode,flash_decode_generation_kernel
+eager,3175.972,3177.348,flash_decode,flash_decode_reduce_kernel
+eager,3177.988,3221.508,out_proj,cublas gemv
+eager,3223.044,3224.388,rmsnorm,fused_add_rmsnorm_kernel
+eager,3226.788,3512.391,gate_up_proj,cublas gemv
+eager,3513.863,3514.503,swiglu,swiglu_kernel
+eager,3515.175,3662.856,down_proj,cublas gemv
+eager,3665.448,3666.824,rmsnorm,fused_add_rmsnorm_kernel
+eager,3667.496,3730.665,qkv_proj,cublas gemv
+eager,3733.001,3733.769,rope_kv_write,fused_rope_cache_kernel
+eager,3735.049,3740.233,flash_decode,flash_decode_generation_kernel
+eager,3741.193,3742.601,flash_decode,flash_decode_reduce_kernel
+eager,3743.241,3786.442,out_proj,cublas gemv
+eager,3787.242,3788.618,rmsnorm,fused_add_rmsnorm_kernel
+eager,3796.362,4081.452,gate_up_proj,cublas gemv
+eager,4083.212,4083.852,swiglu,swiglu_kernel
+eager,4085.26,4233.102,down_proj,cublas gemv
+eager,4234.766,4236.142,rmsnorm,fused_add_rmsnorm_kernel
+eager,4236.814,4299.854,qkv_proj,cublas gemv
+eager,4302.35,4303.118,rope_kv_write,fused_rope_cache_kernel
+eager,4304.398,4309.326,flash_decode,flash_decode_generation_kernel
+eager,4310.542,4311.95,flash_decode,flash_decode_reduce_kernel
+eager,4312.59,4355.759,out_proj,cublas gemv
+eager,4356.591,4357.967,rmsnorm,fused_add_rmsnorm_kernel
+eager,4358.671,4644.081,gate_up_proj,cublas gemv
+eager,4645.393,4646.033,swiglu,swiglu_kernel
+eager,4646.801,4793.427,down_proj,cublas gemv
+eager,4794.899,4796.275,rmsnorm,fused_add_rmsnorm_kernel
+eager,4796.979,4859.923,qkv_proj,cublas gemv
+eager,4862.483,4863.251,rope_kv_write,fused_rope_cache_kernel
+eager,4864.531,4869.363,flash_decode,flash_decode_generation_kernel
+eager,4870.675,4872.083,flash_decode,flash_decode_reduce_kernel
+eager,4872.723,4915.348,out_proj,cublas gemv
+eager,4917.78,4919.156,rmsnorm,fused_add_rmsnorm_kernel
+eager,4928.244,5213.526,gate_up_proj,cublas gemv
+eager,5215.766,5216.406,swiglu,swiglu_kernel
+eager,5217.814,5365.56,down_proj,cublas gemv
+eager,5367.32,5368.696,rmsnorm,fused_add_rmsnorm_kernel
+eager,5369.368,5432.472,qkv_proj,cublas gemv
+eager,5434.904,5435.672,rope_kv_write,fused_rope_cache_kernel
+eager,5436.952,5442.009,flash_decode,flash_decode_generation_kernel
+eager,5443.097,5444.505,flash_decode,flash_decode_reduce_kernel
+eager,5445.145,5488.121,out_proj,cublas gemv
+eager,5490.201,5491.577,rmsnorm,fused_add_rmsnorm_kernel
+eager,5497.433,5782.62,gate_up_proj,cublas gemv
+eager,5784.092,5784.732,swiglu,swiglu_kernel
+eager,5785.692,5932.925,down_proj,cublas gemv
+eager,5933.597,5934.973,rmsnorm,fused_add_rmsnorm_kernel
+eager,5935.645,5998.878,qkv_proj,cublas gemv
+eager,6001.182,6001.95,rope_kv_write,fused_rope_cache_kernel
+eager,6003.23,6008.446,flash_decode,flash_decode_generation_kernel
+eager,6009.374,6010.782,flash_decode,flash_decode_reduce_kernel
+eager,6011.454,6054.75,out_proj,cublas gemv
+eager,6055.422,6056.798,rmsnorm,fused_add_rmsnorm_kernel
+eager,6057.502,6342.593,gate_up_proj,cublas gemv
+eager,6343.201,6343.809,swiglu,swiglu_kernel
+eager,6344.481,6492.162,down_proj,cublas gemv
+eager,6492.738,6494.114,rmsnorm,fused_add_rmsnorm_kernel
+eager,6494.754,6557.795,qkv_proj,cublas gemv
+eager,6560.291,6561.059,rope_kv_write,fused_rope_cache_kernel
+eager,6561.571,6566.499,flash_decode,flash_decode_generation_kernel
+eager,6582.659,6584.035,flash_decode,flash_decode_reduce_kernel
+eager,6635.875,6678.756,out_proj,cublas gemv
+eager,6709.54,6711.108,rmsnorm,fused_add_rmsnorm_kernel
+eager,6749.028,7034.055,gate_up_proj,cublas gemv
+eager,7035.463,7036.103,swiglu,swiglu_kernel
+eager,7036.807,7184.456,down_proj,cublas gemv
+eager,7187.016,7188.392,rmsnorm,fused_add_rmsnorm_kernel
+eager,7189.064,7251.913,qkv_proj,cublas gemv
+eager,7252.521,7253.257,rope_kv_write,fused_rope_cache_kernel
+eager,7254.569,7259.433,flash_decode,flash_decode_generation_kernel
+eager,7260.713,7262.121,flash_decode,flash_decode_reduce_kernel
+eager,7303.081,7346.026,out_proj,cublas gemv
+eager,7375.05,7376.458,rmsnorm,fused_add_rmsnorm_kernel
+eager,7427.466,7712.781,gate_up_proj,cublas gemv
+eager,7714.349,7714.989,swiglu,swiglu_kernel
+eager,7715.661,7862.99,down_proj,cublas gemv
+eager,7863.854,7865.358,rmsnorm,fused_add_rmsnorm_kernel
+eager,7865.966,7929.007,qkv_proj,cublas gemv
+eager,7931.439,7932.207,rope_kv_write,fused_rope_cache_kernel
+eager,7933.487,7938.287,flash_decode,flash_decode_generation_kernel
+eager,7939.663,7941.071,flash_decode,flash_decode_reduce_kernel
+eager,7990.64,8033.456,out_proj,cublas gemv
+eager,8063.824,8065.232,rmsnorm,fused_add_rmsnorm_kernel
+eager,8104.209,8389.587,gate_up_proj,cublas gemv
+eager,8391.219,8391.859,swiglu,swiglu_kernel
+eager,8392.499,8540.245,down_proj,cublas gemv
+eager,8542.773,8544.181,rmsnorm,fused_add_rmsnorm_kernel
+eager,8544.821,8607.765,qkv_proj,cublas gemv
+eager,8608.341,8609.077,rope_kv_write,fused_rope_cache_kernel
+eager,8610.357,8615.445,flash_decode,flash_decode_generation_kernel
+eager,8626.645,8628.053,flash_decode,flash_decode_reduce_kernel
+eager,8679.638,8722.294,out_proj,cublas gemv
+eager,8751.542,8753.142,rmsnorm,fused_add_rmsnorm_kernel
+eager,8795.671,9080.761,gate_up_proj,cublas gemv
+eager,9081.401,9082.041,swiglu,swiglu_kernel
+eager,9082.681,9230.555,down_proj,cublas gemv
+eager,9232.987,9234.363,rmsnorm,fused_add_rmsnorm_kernel
+eager,9235.035,9297.819,qkv_proj,cublas gemv
+eager,9298.491,9299.227,rope_kv_write,fused_rope_cache_kernel
+eager,9299.963,9304.731,flash_decode,flash_decode_generation_kernel
+eager,9306.683,9308.123,flash_decode,flash_decode_reduce_kernel
+eager,9328.988,9372.252,out_proj,cublas gemv
+eager,9389.852,9391.196,rmsnorm,fused_add_rmsnorm_kernel
+eager,9433.629,9718.975,gate_up_proj,cublas gemv
+eager,9720.383,9721.023,swiglu,swiglu_kernel
+eager,9722.431,9870.593,down_proj,cublas gemv
+eager,9871.969,9873.345,rmsnorm,fused_add_rmsnorm_kernel
+eager,9874.017,9937.057,qkv_proj,cublas gemv
+eager,9939.521,9940.289,rope_kv_write,fused_rope_cache_kernel
+eager,9941.569,9946.849,flash_decode,flash_decode_generation_kernel
+eager,9947.713,9949.121,flash_decode,flash_decode_reduce_kernel
+eager,9949.761,9992.898,out_proj,cublas gemv
+eager,9993.794,9995.138,rmsnorm,fused_add_rmsnorm_kernel
+eager,9995.842,10280.964,gate_up_proj,cublas gemv
+eager,10281.54,10282.18,swiglu,swiglu_kernel
+eager,10282.916,10430.342,down_proj,cublas gemv
+eager,10431.046,10432.486,rmsnorm,fused_add_rmsnorm_kernel
+eager,10433.094,10496.358,qkv_proj,cublas gemv
+eager,10498.63,10499.398,rope_kv_write,fused_rope_cache_kernel
+eager,10500.678,10505.606,flash_decode,flash_decode_generation_kernel
+eager,10506.854,10508.23,flash_decode,flash_decode_reduce_kernel
+eager,10508.87,10551.655,out_proj,cublas gemv
+eager,10553.927,10555.303,rmsnorm,fused_add_rmsnorm_kernel
+eager,10559.303,10844.489,gate_up_proj,cublas gemv
+eager,10846.793,10847.433,swiglu,swiglu_kernel
+eager,10848.073,10995.499,down_proj,cublas gemv
+eager,10996.299,10997.675,rmsnorm,fused_add_rmsnorm_kernel
+eager,10998.347,11061.579,qkv_proj,cublas gemv
+eager,11063.883,11064.651,rope_kv_write,fused_rope_cache_kernel
+eager,11065.931,11070.731,flash_decode,flash_decode_generation_kernel
+eager,11072.075,11073.483,flash_decode,flash_decode_reduce_kernel
+eager,11074.155,11117.42,out_proj,cublas gemv
+eager,11118.124,11119.468,rmsnorm,fused_add_rmsnorm_kernel
+eager,11120.204,11405.358,gate_up_proj,cublas gemv
+eager,11405.902,11406.542,swiglu,swiglu_kernel
+eager,11407.95,11554.64,down_proj,cublas gemv
+eager,11555.408,11556.784,rmsnorm,fused_add_rmsnorm_kernel
+eager,11557.456,11620.08,qkv_proj,cublas gemv
+eager,11620.944,11621.68,rope_kv_write,fused_rope_cache_kernel
+eager,11622.992,11628.08,flash_decode,flash_decode_generation_kernel
+eager,11629.136,11630.544,flash_decode,flash_decode_reduce_kernel
+eager,11631.184,11674.545,out_proj,cublas gemv
+eager,11675.185,11676.561,rmsnorm,fused_add_rmsnorm_kernel
+eager,11683.569,11968.724,gate_up_proj,cublas gemv
+eager,11971.156,11971.796,swiglu,swiglu_kernel
+eager,11972.5,12119.925,down_proj,cublas gemv
+eager,12120.661,12122.037,rmsnorm,fused_add_rmsnorm_kernel
+eager,12122.709,12185.814,qkv_proj,cublas gemv
+eager,12188.246,12189.014,rope_kv_write,fused_rope_cache_kernel
+eager,12190.294,12195.094,flash_decode,flash_decode_generation_kernel
+eager,12196.438,12197.846,flash_decode,flash_decode_reduce_kernel
+eager,12198.486,12241.622,out_proj,cublas gemv
+eager,12243.542,12244.918,rmsnorm,fused_add_rmsnorm_kernel
+eager,12245.59,12531.065,gate_up_proj,cublas gemv
+eager,12532.313,12532.953,swiglu,swiglu_kernel
+eager,12534.393,12682.522,down_proj,cublas gemv
+eager,12683.866,12685.242,rmsnorm,fused_add_rmsnorm_kernel
+eager,12685.914,12748.763,qkv_proj,cublas gemv
+eager,12749.403,12750.139,rope_kv_write,fused_rope_cache_kernel
+eager,12751.451,12756.443,flash_decode,flash_decode_generation_kernel
+eager,12757.627,12759.035,flash_decode,flash_decode_reduce_kernel
+eager,12759.643,12802.235,out_proj,cublas gemv
+eager,12804.699,12806.075,rmsnorm,fused_add_rmsnorm_kernel
+eager,12809.627,13094.75,gate_up_proj,cublas gemv
+eager,13095.518,13096.126,swiglu,swiglu_kernel
+eager,13096.798,13244.767,down_proj,cublas gemv
+eager,13247.071,13248.575,rmsnorm,fused_add_rmsnorm_kernel
+eager,13249.183,13312.256,qkv_proj,cublas gemv
+eager,13314.656,13315.424,rope_kv_write,fused_rope_cache_kernel
+eager,13316.704,13321.504,flash_decode,flash_decode_generation_kernel
+eager,13322.848,13324.256,flash_decode,flash_decode_reduce_kernel
+eager,13324.896,13367.936,out_proj,cublas gemv
+eager,13369.952,13371.424,rmsnorm,fused_add_rmsnorm_kernel
+eager,13372.0,13657.059,gate_up_proj,cublas gemv
+eager,13657.699,13658.307,swiglu,swiglu_kernel
+eager,13659.747,13807.3,down_proj,cublas gemv
+eager,13809.284,13810.628,rmsnorm,fused_add_rmsnorm_kernel
+eager,13811.332,13874.245,qkv_proj,cublas gemv
+eager,13874.789,13875.557,rope_kv_write,fused_rope_cache_kernel
+eager,13876.837,13881.701,flash_decode,flash_decode_generation_kernel
+eager,13882.981,13884.389,flash_decode,flash_decode_reduce_kernel
+eager,13885.029,13927.813,out_proj,cublas gemv
+eager,13929.061,13930.565,rmsnorm,fused_add_rmsnorm_kernel
+eager,13931.109,14216.296,gate_up_proj,cublas gemv
+eager,14218.856,14219.528,swiglu,swiglu_kernel
+eager,14220.232,14368.457,down_proj,cublas gemv
+eager,14370.409,14371.785,rmsnorm,fused_add_rmsnorm_kernel
+eager,14372.489,14435.178,qkv_proj,cublas gemv
+eager,14435.946,14436.682,rope_kv_write,fused_rope_cache_kernel
+eager,14437.994,14442.89,flash_decode,flash_decode_generation_kernel
+eager,14444.138,14445.546,flash_decode,flash_decode_reduce_kernel
+eager,14446.186,14489.098,out_proj,cublas gemv
+eager,14490.218,14491.594,rmsnorm,fused_add_rmsnorm_kernel
+eager,14500.618,14785.773,gate_up_proj,cublas gemv
+eager,14787.181,14787.821,swiglu,swiglu_kernel
+eager,14788.333,14935.63,down_proj,cublas gemv
+eager,14936.686,14938.062,rmsnorm,fused_add_rmsnorm_kernel
+eager,14938.734,15001.871,qkv_proj,cublas gemv
+eager,15004.271,15005.039,rope_kv_write,fused_rope_cache_kernel
+eager,15006.319,15011.183,flash_decode,flash_decode_generation_kernel
+eager,15012.495,15013.903,flash_decode,flash_decode_reduce_kernel
+eager,15014.511,15057.263,out_proj,cublas gemv
+eager,15059.567,15060.944,rmsnorm,fused_add_rmsnorm_kernel
+eager,15062.096,15347.122,gate_up_proj,cublas gemv
+eager,15348.338,15348.946,swiglu,swiglu_kernel
+eager,15349.618,15497.875,down_proj,cublas gemv
+eager,15499.891,15501.299,rmsnorm,fused_add_rmsnorm_kernel
+eager,15501.971,15565.172,qkv_proj,cublas gemv
+eager,15567.476,15568.244,rope_kv_write,fused_rope_cache_kernel
+eager,15569.524,15574.676,flash_decode,flash_decode_generation_kernel
+eager,15575.668,15577.076,flash_decode,flash_decode_reduce_kernel
+eager,15577.716,15620.725,out_proj,cublas gemv
+eager,15621.717,15623.157,rmsnorm,fused_add_rmsnorm_kernel
+eager,15636.725,15922.039,gate_up_proj,cublas gemv
+eager,15923.831,15924.471,swiglu,swiglu_kernel
+eager,15925.111,16072.729,down_proj,cublas gemv
+eager,16073.337,16074.713,rmsnorm,fused_add_rmsnorm_kernel
+eager,16075.385,16138.393,qkv_proj,cublas gemv
+eager,16140.921,16141.689,rope_kv_write,fused_rope_cache_kernel
+eager,16142.233,16147.065,flash_decode,flash_decode_generation_kernel
+eager,16164.761,16166.17,flash_decode,flash_decode_reduce_kernel
+eager,16217.658,16260.73,out_proj,cublas gemv
+eager,16289.211,16290.683,rmsnorm,fused_add_rmsnorm_kernel
+eager,16328.347,16613.47,gate_up_proj,cublas gemv
+eager,16615.038,16615.71,swiglu,swiglu_kernel
+eager,16616.574,16764.319,down_proj,cublas gemv
+eager,16766.623,16768.031,rmsnorm,fused_add_rmsnorm_kernel
+eager,16768.671,16831.872,qkv_proj,cublas gemv
+eager,16834.176,16834.944,rope_kv_write,fused_rope_cache_kernel
+eager,16836.224,16841.472,flash_decode,flash_decode_generation_kernel
+eager,16849.376,16850.784,flash_decode,flash_decode_reduce_kernel
+eager,16902.88,16945.665,out_proj,cublas gemv
+eager,16974.593,16976.065,rmsnorm,fused_add_rmsnorm_kernel
+eager,17014.113,17299.204,gate_up_proj,cublas gemv
+eager,17300.1,17300.74,swiglu,swiglu_kernel
+eager,17301.38,17447.973,down_proj,cublas gemv
+eager,17449.605,17451.013,rmsnorm,fused_add_rmsnorm_kernel
+eager,17451.685,17514.598,qkv_proj,cublas gemv
+eager,17515.142,17515.878,rope_kv_write,fused_rope_cache_kernel
+eager,17516.486,17521.574,flash_decode,flash_decode_generation_kernel
+eager,17523.366,17524.774,flash_decode,flash_decode_reduce_kernel
+eager,17575.014,17617.703,out_proj,cublas gemv
+eager,17647.879,17649.287,rmsnorm,fused_add_rmsnorm_kernel
+eager,17687.527,17972.522,gate_up_proj,cublas gemv
+eager,17973.898,17974.57,swiglu,swiglu_kernel
+eager,17975.978,18122.891,down_proj,cublas gemv
+eager,18125.451,18126.859,rmsnorm,fused_add_rmsnorm_kernel
+eager,18127.499,18190.7,qkv_proj,cublas gemv
+eager,18193.036,18193.804,rope_kv_write,fused_rope_cache_kernel
+eager,18195.084,18200.364,flash_decode,flash_decode_generation_kernel
+eager,18201.26,18202.668,flash_decode,flash_decode_reduce_kernel
+eager,18236.748,18279.501,out_proj,cublas gemv
+eager,18296.301,18297.709,rmsnorm,fused_add_rmsnorm_kernel
+eager,18329.709,18614.768,gate_up_proj,cublas gemv
+eager,18616.976,18617.616,swiglu,swiglu_kernel
+eager,18618.256,18764.849,down_proj,cublas gemv
+eager,18766.481,18768.017,rmsnorm,fused_add_rmsnorm_kernel
+eager,18770.609,18833.906,qkv_proj,cublas gemv
+eager,18836.114,18836.882,rope_kv_write,fused_rope_cache_kernel
+eager,18838.162,18843.41,flash_decode,flash_decode_generation_kernel
+eager,18844.306,18845.714,flash_decode,flash_decode_reduce_kernel
+eager,18846.354,18889.394,out_proj,cublas gemv
+eager,18890.354,18891.73,rmsnorm,fused_add_rmsnorm_kernel
+eager,18899.41,19184.885,gate_up_proj,cublas gemv
+eager,19187.381,19188.021,swiglu,swiglu_kernel
+eager,19189.397,19337.238,down_proj,cublas gemv
+eager,19338.934,19340.438,rmsnorm,fused_add_rmsnorm_kernel
+eager,19343.03,19405.911,qkv_proj,cublas gemv
+eager,19406.487,19407.223,rope_kv_write,fused_rope_cache_kernel
+eager,19408.535,19413.463,flash_decode,flash_decode_generation_kernel
+eager,19414.679,19416.087,flash_decode,flash_decode_reduce_kernel
+eager,19458.967,19501.848,out_proj,cublas gemv
+eager,19531.864,19533.272,rmsnorm,fused_add_rmsnorm_kernel
+eager,19571.576,19856.923,gate_up_proj,cublas gemv
+eager,19859.099,19859.739,swiglu,swiglu_kernel
+eager,19860.571,20008.508,down_proj,cublas gemv
+eager,20010.684,20012.06,rmsnorm,fused_add_rmsnorm_kernel
+eager,20012.7,21293.512,lm_head,cublas gemv
+eager,21294.76,21315.176,other,reduce_kernel
+eager,0,21334.527,STEP (nvtx range),"decode step 2 (batch 1, eager)"
+eager+hooks,37.87,38.798,other,vectorized_elementwise_kernel
+eager+hooks,104.143,107.407,other,index_elementwise_kernel
+eager+hooks,238.288,239.408,rmsnorm,rmsnorm_kernel
+eager+hooks,328.433,391.121,qkv_proj,cublas gemv
+eager+hooks,448.146,449.042,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,612.147,616.979,flash_decode,flash_decode_generation_kernel
+eager+hooks,676.436,677.844,flash_decode,flash_decode_reduce_kernel
+eager+hooks,781.461,824.469,out_proj,cublas gemv
+eager+hooks,902.87,904.31,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,972.663,1257.753,gate_up_proj,cublas gemv
+eager+hooks,1258.393,1259.129,swiglu,swiglu_kernel
+eager+hooks,1260.441,1407.642,down_proj,cublas gemv
+eager+hooks,1408.922,1410.33,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,1410.97,1473.787,qkv_proj,cublas gemv
+eager+hooks,1474.459,1475.195,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,1570.364,1575.164,flash_decode,flash_decode_generation_kernel
+eager+hooks,1614.62,1615.964,flash_decode,flash_decode_reduce_kernel
+eager+hooks,1689.501,1732.029,out_proj,cublas gemv
+eager+hooks,1789.726,1791.102,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,1868.543,2153.537,gate_up_proj,cublas gemv
+eager+hooks,2155.425,2156.097,swiglu,swiglu_kernel
+eager+hooks,2156.769,2304.771,down_proj,cublas gemv
+eager+hooks,2305.987,2307.363,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,2308.035,2370.851,qkv_proj,cublas gemv
+eager+hooks,2372.515,2373.283,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,2459.14,2463.972,flash_decode,flash_decode_generation_kernel
+eager+hooks,2502.756,2504.1,flash_decode,flash_decode_reduce_kernel
+eager+hooks,2576.869,2619.365,out_proj,cublas gemv
+eager+hooks,2676.678,2678.054,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,2743.495,3028.777,gate_up_proj,cublas gemv
+eager+hooks,3030.953,3031.625,swiglu,swiglu_kernel
+eager+hooks,3033.033,3180.202,down_proj,cublas gemv
+eager+hooks,3181.482,3182.858,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,3183.53,3246.443,qkv_proj,cublas gemv
+eager+hooks,3246.987,3247.755,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,3352.492,3357.292,flash_decode,flash_decode_generation_kernel
+eager+hooks,3395.244,3396.588,flash_decode,flash_decode_reduce_kernel
+eager+hooks,3470.541,3513.229,out_proj,cublas gemv
+eager+hooks,3568.43,3569.774,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,3636.079,3921.425,gate_up_proj,cublas gemv
+eager+hooks,3922.865,3923.505,swiglu,swiglu_kernel
+eager+hooks,3924.145,4072.659,down_proj,cublas gemv
+eager+hooks,4073.395,4074.803,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,4075.443,4138.515,qkv_proj,cublas gemv
+eager+hooks,4140.979,4141.747,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,4233.94,4238.708,flash_decode,flash_decode_generation_kernel
+eager+hooks,4277.044,4278.388,flash_decode,flash_decode_reduce_kernel
+eager+hooks,4351.445,4394.645,out_proj,cublas gemv
+eager+hooks,4450.774,4452.118,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,4517.111,4802.873,gate_up_proj,cublas gemv
+eager+hooks,4803.513,4804.153,swiglu,swiglu_kernel
+eager+hooks,4805.561,4953.21,down_proj,cublas gemv
+eager+hooks,4955.098,4956.474,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,4957.114,5020.027,qkv_proj,cublas gemv
+eager+hooks,5020.603,5021.371,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,5109.308,5114.14,flash_decode,flash_decode_generation_kernel
+eager+hooks,5152.284,5153.628,flash_decode,flash_decode_reduce_kernel
+eager+hooks,5226.621,5269.277,out_proj,cublas gemv
+eager+hooks,5324.222,5325.63,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,5391.87,5677.217,gate_up_proj,cublas gemv
+eager+hooks,5678.017,5678.657,swiglu,swiglu_kernel
+eager+hooks,5679.297,5827.394,down_proj,cublas gemv
+eager+hooks,5828.578,5829.954,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,5830.594,5893.763,qkv_proj,cublas gemv
+eager+hooks,5895.107,5895.875,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,5984.708,5989.796,flash_decode,flash_decode_generation_kernel
+eager+hooks,6027.556,6028.9,flash_decode,flash_decode_reduce_kernel
+eager+hooks,6102.149,6144.965,out_proj,cublas gemv
+eager+hooks,6201.958,6203.302,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,6269.062,6553.993,gate_up_proj,cublas gemv
+eager+hooks,6555.593,6556.233,swiglu,swiglu_kernel
+eager+hooks,6557.641,6706.09,down_proj,cublas gemv
+eager+hooks,6708.17,6709.578,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,6710.25,6773.323,qkv_proj,cublas gemv
+eager+hooks,6775.755,6776.523,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,6861.74,6866.828,flash_decode,flash_decode_generation_kernel
+eager+hooks,6905.452,6906.796,flash_decode,flash_decode_reduce_kernel
+eager+hooks,6980.749,7023.629,out_proj,cublas gemv
+eager+hooks,7077.774,7079.118,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,7144.27,7429.393,gate_up_proj,cublas gemv
+eager+hooks,7431.121,7431.761,swiglu,swiglu_kernel
+eager+hooks,7432.465,7580.178,down_proj,cublas gemv
+eager+hooks,7582.674,7584.082,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,7584.722,7649.427,qkv_proj,cublas gemv
+eager+hooks,7651.283,7652.051,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,7722.643,7727.795,flash_decode,flash_decode_generation_kernel
+eager+hooks,7764.532,7765.876,flash_decode,flash_decode_reduce_kernel
+eager+hooks,7847.253,7890.005,out_proj,cublas gemv
+eager+hooks,7948.853,7950.198,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,8015.35,8300.505,gate_up_proj,cublas gemv
+eager+hooks,8302.553,8303.193,swiglu,swiglu_kernel
+eager+hooks,8304.601,8452.666,down_proj,cublas gemv
+eager+hooks,8455.162,8456.57,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,8457.21,8520.283,qkv_proj,cublas gemv
+eager+hooks,8522.715,8523.483,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,8596.187,8600.923,flash_decode,flash_decode_generation_kernel
+eager+hooks,8638.812,8640.156,flash_decode,flash_decode_reduce_kernel
+eager+hooks,8712.412,8756.093,out_proj,cublas gemv
+eager+hooks,8816.637,8818.109,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,8885.566,9170.849,gate_up_proj,cublas gemv
+eager+hooks,9171.937,9172.577,swiglu,swiglu_kernel
+eager+hooks,9173.537,9321.954,down_proj,cublas gemv
+eager+hooks,9323.522,9324.898,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,9325.57,9388.642,qkv_proj,cublas gemv
+eager+hooks,9390.05,9390.787,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,9467.907,9472.771,flash_decode,flash_decode_generation_kernel
+eager+hooks,9510.948,9512.292,flash_decode,flash_decode_reduce_kernel
+eager+hooks,9584.548,9627.525,out_proj,cublas gemv
+eager+hooks,9683.205,9684.517,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,9751.27,10036.264,gate_up_proj,cublas gemv
+eager+hooks,10038.248,10038.888,swiglu,swiglu_kernel
+eager+hooks,10040.296,10187.882,down_proj,cublas gemv
+eager+hooks,10189.802,10191.274,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,10191.882,10254.698,qkv_proj,cublas gemv
+eager+hooks,10256.362,10257.13,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,10346.475,10351.371,flash_decode,flash_decode_generation_kernel
+eager+hooks,10389.292,10390.636,flash_decode,flash_decode_reduce_kernel
+eager+hooks,10463.404,10506.253,out_proj,cublas gemv
+eager+hooks,10561.165,10562.509,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,10627.278,10912.432,gate_up_proj,cublas gemv
+eager+hooks,10913.776,10914.416,swiglu,swiglu_kernel
+eager+hooks,10915.056,11061.714,down_proj,cublas gemv
+eager+hooks,11062.29,11063.762,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,11064.338,11127.89,qkv_proj,cublas gemv
+eager+hooks,11128.818,11129.586,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,11225.651,11230.867,flash_decode,flash_decode_generation_kernel
+eager+hooks,11268.499,11269.843,flash_decode,flash_decode_reduce_kernel
+eager+hooks,11342.452,11385.493,out_proj,cublas gemv
+eager+hooks,11441.205,11442.549,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,11508.31,11793.528,gate_up_proj,cublas gemv
+eager+hooks,11794.424,11795.064,swiglu,swiglu_kernel
+eager+hooks,11796.472,11944.314,down_proj,cublas gemv
+eager+hooks,11946.01,11947.386,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,11948.058,12010.81,qkv_proj,cublas gemv
+eager+hooks,12011.514,12012.25,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,12098.075,12103.003,flash_decode,flash_decode_generation_kernel
+eager+hooks,12141.115,12142.427,flash_decode,flash_decode_reduce_kernel
+eager+hooks,12214.108,12257.116,out_proj,cublas gemv
+eager+hooks,12311.933,12313.309,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,12378.077,12663.008,gate_up_proj,cublas gemv
+eager+hooks,12663.808,12664.448,swiglu,swiglu_kernel
+eager+hooks,12665.088,12812.705,down_proj,cublas gemv
+eager+hooks,12814.337,12815.745,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,12816.417,12879.202,qkv_proj,cublas gemv
+eager+hooks,12880.898,12881.666,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,12970.243,12975.011,flash_decode,flash_decode_generation_kernel
+eager+hooks,13012.675,13014.019,flash_decode,flash_decode_reduce_kernel
+eager+hooks,13086.404,13129.316,out_proj,cublas gemv
+eager+hooks,13183.493,13184.837,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,13250.309,13535.496,gate_up_proj,cublas gemv
+eager+hooks,13536.264,13536.904,swiglu,swiglu_kernel
+eager+hooks,13538.312,13685.961,down_proj,cublas gemv
+eager+hooks,13686.793,13688.201,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,13688.841,13751.786,qkv_proj,cublas gemv
+eager+hooks,13752.362,13753.13,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,13840.011,13844.715,flash_decode,flash_decode_generation_kernel
+eager+hooks,13882.827,13884.171,flash_decode,flash_decode_reduce_kernel
+eager+hooks,13958.796,14001.612,out_proj,cublas gemv
+eager+hooks,14056.301,14057.677,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,14123.405,14408.4,gate_up_proj,cublas gemv
+eager+hooks,14409.744,14410.384,swiglu,swiglu_kernel
+eager+hooks,14411.024,14558.705,down_proj,cublas gemv
+eager+hooks,14560.273,14561.681,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,14562.321,14625.618,qkv_proj,cublas gemv
+eager+hooks,14627.858,14628.626,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,14706.13,14710.963,flash_decode,flash_decode_generation_kernel
+eager+hooks,14748.851,14750.195,flash_decode,flash_decode_reduce_kernel
+eager+hooks,14832.5,14875.444,out_proj,cublas gemv
+eager+hooks,14933.621,14934.965,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,15001.269,15286.68,gate_up_proj,cublas gemv
+eager+hooks,15288.344,15288.984,swiglu,swiglu_kernel
+eager+hooks,15290.392,15438.105,down_proj,cublas gemv
+eager+hooks,15438.873,15440.409,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,15442.969,15505.786,qkv_proj,cublas gemv
+eager+hooks,15506.426,15507.194,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,15583.098,15587.866,flash_decode,flash_decode_generation_kernel
+eager+hooks,15625.755,15627.099,flash_decode,flash_decode_reduce_kernel
+eager+hooks,15700.923,15743.996,out_proj,cublas gemv
+eager+hooks,15805.436,15806.78,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,15876.061,16161.344,gate_up_proj,cublas gemv
+eager+hooks,16162.848,16163.488,swiglu,swiglu_kernel
+eager+hooks,16164.128,16312.097,down_proj,cublas gemv
+eager+hooks,16313.377,16314.753,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,16315.457,16378.498,qkv_proj,cublas gemv
+eager+hooks,16380.962,16381.73,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,16461.122,16465.922,flash_decode,flash_decode_generation_kernel
+eager+hooks,16503.779,16505.123,flash_decode,flash_decode_reduce_kernel
+eager+hooks,16578.339,16621.54,out_proj,cublas gemv
+eager+hooks,16676.1,16677.636,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,16743.813,17029.095,gate_up_proj,cublas gemv
+eager+hooks,17030.183,17030.823,swiglu,swiglu_kernel
+eager+hooks,17032.263,17180.105,down_proj,cublas gemv
+eager+hooks,17181.737,17183.145,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,17183.817,17247.081,qkv_proj,cublas gemv
+eager+hooks,17248.297,17249.065,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,17340.938,17345.642,flash_decode,flash_decode_generation_kernel
+eager+hooks,17383.019,17384.363,flash_decode,flash_decode_reduce_kernel
+eager+hooks,17457.995,17500.972,out_proj,cublas gemv
+eager+hooks,17555.468,17556.812,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,17621.901,17906.959,gate_up_proj,cublas gemv
+eager+hooks,17907.759,17908.399,swiglu,swiglu_kernel
+eager+hooks,17909.263,18057.105,down_proj,cublas gemv
+eager+hooks,18059.345,18060.721,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,18061.393,18124.625,qkv_proj,cublas gemv
+eager+hooks,18125.873,18126.641,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,18217.33,18222.098,flash_decode,flash_decode_generation_kernel
+eager+hooks,18259.155,18260.531,flash_decode,flash_decode_reduce_kernel
+eager+hooks,18332.979,18375.828,out_proj,cublas gemv
+eager+hooks,18431.476,18432.82,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,18498.869,18784.471,gate_up_proj,cublas gemv
+eager+hooks,18785.335,18785.975,swiglu,swiglu_kernel
+eager+hooks,18787.383,18935.289,down_proj,cublas gemv
+eager+hooks,18935.897,18937.273,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,18937.913,19001.497,qkv_proj,cublas gemv
+eager+hooks,19002.425,19003.161,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,19092.986,19097.914,flash_decode,flash_decode_generation_kernel
+eager+hooks,19134.586,19135.898,flash_decode,flash_decode_reduce_kernel
+eager+hooks,19209.531,19252.379,out_proj,cublas gemv
+eager+hooks,19306.492,19307.836,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,19373.117,19658.335,gate_up_proj,cublas gemv
+eager+hooks,19659.839,19660.479,swiglu,swiglu_kernel
+eager+hooks,19661.215,19809.217,down_proj,cublas gemv
+eager+hooks,19810.369,19811.745,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,19812.417,19875.393,qkv_proj,cublas gemv
+eager+hooks,19877.953,19878.721,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,19962.146,19967.266,flash_decode,flash_decode_generation_kernel
+eager+hooks,20004.738,20006.082,flash_decode,flash_decode_reduce_kernel
+eager+hooks,20078.531,20121.347,out_proj,cublas gemv
+eager+hooks,20176.516,20177.892,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,20242.724,20528.103,gate_up_proj,cublas gemv
+eager+hooks,20529.223,20529.863,swiglu,swiglu_kernel
+eager+hooks,20531.303,20678.792,down_proj,cublas gemv
+eager+hooks,20680.776,20682.312,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,20684.904,20747.785,qkv_proj,cublas gemv
+eager+hooks,20748.361,20749.097,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,20830.378,20835.466,flash_decode,flash_decode_generation_kernel
+eager+hooks,20873.61,20874.922,flash_decode,flash_decode_reduce_kernel
+eager+hooks,20948.587,20991.371,out_proj,cublas gemv
+eager+hooks,21047.468,21048.844,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,21114.188,21399.599,gate_up_proj,cublas gemv
+eager+hooks,21400.655,21401.295,swiglu,swiglu_kernel
+eager+hooks,21401.935,21550.032,down_proj,cublas gemv
+eager+hooks,21551.184,21552.592,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,21553.232,21616.145,qkv_proj,cublas gemv
+eager+hooks,21616.721,21617.489,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,21695.73,21700.498,flash_decode,flash_decode_generation_kernel
+eager+hooks,21738.066,21739.41,flash_decode,flash_decode_reduce_kernel
+eager+hooks,21818.547,21861.523,out_proj,cublas gemv
+eager+hooks,21919.764,21921.172,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,21986.292,22271.575,gate_up_proj,cublas gemv
+eager+hooks,22274.135,22274.807,swiglu,swiglu_kernel
+eager+hooks,22276.183,22424.344,down_proj,cublas gemv
+eager+hooks,22426.744,22428.12,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,22428.792,22491.961,qkv_proj,cublas gemv
+eager+hooks,22494.297,22495.065,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,22567.321,22572.025,flash_decode,flash_decode_generation_kernel
+eager+hooks,22609.946,22611.29,flash_decode,flash_decode_reduce_kernel
+eager+hooks,22684.154,22726.939,out_proj,cublas gemv
+eager+hooks,22783.387,22784.731,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,22859.836,23144.863,gate_up_proj,cublas gemv
+eager+hooks,23145.567,23146.175,swiglu,swiglu_kernel
+eager+hooks,23147.103,23294.944,down_proj,cublas gemv
+eager+hooks,23296.096,23297.472,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,23298.144,23361.217,qkv_proj,cublas gemv
+eager+hooks,23362.657,23363.425,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,23441.857,23446.433,flash_decode,flash_decode_generation_kernel
+eager+hooks,23484.898,23486.242,flash_decode,flash_decode_reduce_kernel
+eager+hooks,23558.914,23601.955,out_proj,cublas gemv
+eager+hooks,23657.507,23658.851,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,23724.772,24009.958,gate_up_proj,cublas gemv
+eager+hooks,24011.878,24012.518,swiglu,swiglu_kernel
+eager+hooks,24013.926,24161.8,down_proj,cublas gemv
+eager+hooks,24163.432,24164.84,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,24165.512,24228.776,qkv_proj,cublas gemv
+eager+hooks,24229.992,24230.728,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,24313.513,24318.377,flash_decode,flash_decode_generation_kernel
+eager+hooks,24356.586,24357.93,flash_decode,flash_decode_reduce_kernel
+eager+hooks,24430.506,24473.259,out_proj,cublas gemv
+eager+hooks,24526.955,24528.267,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,24592.428,24877.422,gate_up_proj,cublas gemv
+eager+hooks,24879.214,24879.854,swiglu,swiglu_kernel
+eager+hooks,24880.494,25027.824,down_proj,cublas gemv
+eager+hooks,25028.72,25030.096,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,25030.768,25094.16,qkv_proj,cublas gemv
+eager+hooks,25096.304,25097.072,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,25186.321,25191.057,flash_decode,flash_decode_generation_kernel
+eager+hooks,25228.113,25229.457,flash_decode,flash_decode_reduce_kernel
+eager+hooks,25301.938,25344.786,out_proj,cublas gemv
+eager+hooks,25399.475,25400.883,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,25467.188,25752.406,gate_up_proj,cublas gemv
+eager+hooks,25753.718,25754.358,swiglu,swiglu_kernel
+eager+hooks,25755.766,25903.704,down_proj,cublas gemv
+eager+hooks,25904.312,25905.688,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,25906.296,25969.208,qkv_proj,cublas gemv
+eager+hooks,25970.808,25971.576,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,26060.249,26065.113,flash_decode,flash_decode_generation_kernel
+eager+hooks,26102.393,26103.737,flash_decode,flash_decode_reduce_kernel
+eager+hooks,26176.41,26219.322,out_proj,cublas gemv
+eager+hooks,26273.275,26274.587,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,26339.419,26624.318,gate_up_proj,cublas gemv
+eager+hooks,26626.174,26626.814,swiglu,swiglu_kernel
+eager+hooks,26627.486,26775.103,down_proj,cublas gemv
+eager+hooks,26775.711,26777.055,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,26777.727,26840.704,qkv_proj,cublas gemv
+eager+hooks,26843.264,26844.032,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,26930.113,26935.009,flash_decode,flash_decode_generation_kernel
+eager+hooks,26972.449,26973.793,flash_decode,flash_decode_reduce_kernel
+eager+hooks,27046.658,27089.73,out_proj,cublas gemv
+eager+hooks,27144.899,27146.243,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,27211.715,27496.934,gate_up_proj,cublas gemv
+eager+hooks,27497.606,27498.246,swiglu,swiglu_kernel
+eager+hooks,27498.982,27645.895,down_proj,cublas gemv
+eager+hooks,27647.111,27648.551,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,27649.159,27712.424,qkv_proj,cublas gemv
+eager+hooks,27713.672,27714.408,rope_kv_write,fused_rope_cache_kernel
+eager+hooks,27791.209,27796.233,flash_decode,flash_decode_generation_kernel
+eager+hooks,27843.241,27844.585,flash_decode,flash_decode_reduce_kernel
+eager+hooks,27919.53,27962.57,out_proj,cublas gemv
+eager+hooks,28016.523,28017.835,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,28082.347,28367.566,gate_up_proj,cublas gemv
+eager+hooks,28369.038,28369.678,swiglu,swiglu_kernel
+eager+hooks,28370.318,28518.319,down_proj,cublas gemv
+eager+hooks,28520.623,28521.999,rmsnorm,fused_add_rmsnorm_kernel
+eager+hooks,28522.671,29802.715,lm_head,cublas gemv
+eager+hooks,29804.699,29825.147,other,reduce_kernel
+eager+hooks,0,29841.998,STEP (nvtx range),"decode step 2 (batch 1, eager-hooks)"

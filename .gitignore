@@ -55,3 +55,6 @@ dist/
 
 # Traces and logging
 profile_trace/
+# Nsight Systems captures embed the process environment (API keys, passwords): never commit
+*.nsys-rep
+docs/perf_history/traces/

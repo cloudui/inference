@@ -1,0 +1,5 @@
+mode,profiler_hooks,run1_ms,run2_ms,run3_ms,median_ms,median_tok_s
+eager,off,19.517,19.523,19.526,19.523,51.22
+eager,on,24.491,25.042,24.705,24.705,40.48
+cuda-graphs,off,19.053,19.141,19.040,19.053,52.49
+cuda-graphs,on,19.045,19.047,19.080,19.047,52.50

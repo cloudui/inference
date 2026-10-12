@@ -1,0 +1,5 @@
+metric,value,how
+peak_fp16_tflop_s,151.0,8192^3 fp16 GEMM (torch.matmul) - best of 8192/12288
+practical_gb_s,820,best isolated GEMV (REPORT.md)
+spec_gb_s,896,RTX PRO 4500 Blackwell spec
+copy_gb_s,737,1 GiB device-to-device copy counted read+write

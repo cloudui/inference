@@ -1,0 +1,12 @@
+op,ms
+"other (embed, position update)",0.0042
+rmsnorm,0.1002
+qkv_proj,2.0198
+rope_kv_write,0.0291
+flash_decode,0.2136
+out_proj,1.3794
+gate_up_proj,9.1397
+swiglu,0.0287
+down_proj,4.724
+lm_head,1.2823
+gaps between kernels (CUDA graphs),0.132
